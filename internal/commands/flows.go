@@ -26,6 +26,7 @@ type flowsListFlags struct {
 	order  string
 	desc   bool
 	all    bool
+	debug  bool
 }
 
 // NewFlowsCmd creates the flows command.
@@ -75,6 +76,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.order, "order", "name", "Order by field")
 	cmd.Flags().BoolVar(&flags.desc, "desc", false, "Sort in descending order")
 	cmd.Flags().BoolVar(&flags.all, "all", false, "Fetch all flows (no limit)")
+	cmd.Flags().BoolVar(&flags.debug, "debug", false, "Show debug info including raw gzipped values")
 
 	cmd.AddCommand(
 		newFlowsExecutionsCmd(),
@@ -144,7 +146,8 @@ func runFlowsList(cmd *cobra.Command, flags flowsListFlags) error {
 	// Interactive mode - let user select a flow to view (auto-detect TTY)
 	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
 	if useInteractive {
-		selectedFlow, err := pickFlowFromList(flows)
+		// Use paginated picker for interactive mode
+		selectedFlow, err := pickFlowPaginated(cmd.Context(), sdkClient, sysparmQuery, flags.order, flags.desc)
 		if err != nil {
 			return err
 		}
@@ -467,6 +470,7 @@ func runFlowsShow(cmd *cobra.Command, name string, showVariables bool) error {
 		"flow": map[string]any{
 			"sys_id":      inspection.Flow.SysID,
 			"name":        inspection.Flow.Name,
+			"type":        inspection.Flow.Type,
 			"active":      inspection.Flow.Active,
 			"description": inspection.Flow.Description,
 			"version":     inspection.Flow.Version,
@@ -686,6 +690,60 @@ func pickFlowFromList(flows []sdk.Flow) (string, error) {
 	}
 
 	selected, err := tui.Pick("Select a flow to view:", items, tui.WithMaxVisible(15))
+	if err != nil {
+		return "", err
+	}
+	if selected == nil {
+		return "", nil
+	}
+
+	return selected.ID, nil
+}
+
+// pickFlowPaginated shows a paginated interactive picker for flows.
+// Fetches pages on demand so the user can scroll through all flows.
+func pickFlowPaginated(ctx context.Context, sdkClient *sdk.Client, query, orderBy string, orderDesc bool) (string, error) {
+	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+		opts := &sdk.ListFlowsOptions{
+			Limit:     limit,
+			Offset:    offset,
+			Query:     query,
+			OrderBy:   orderBy,
+			OrderDesc: orderDesc,
+		}
+		flows, err := sdkClient.ListFlows(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+
+		var items []tui.PickerItem
+		for _, f := range flows {
+			status := "Active"
+			if !f.Active {
+				status = "Inactive"
+			}
+			scope := f.Scope
+			if scope == "" {
+				scope = f.SysScope
+			}
+			if scope == "" {
+				scope = "global"
+			}
+			items = append(items, tui.PickerItem{
+				ID:          f.Name,
+				Title:       f.Name,
+				Description: fmt.Sprintf("%s - %s", status, scope),
+			})
+		}
+
+		hasMore := len(flows) >= limit
+		return &tui.PageResult{
+			Items:   items,
+			HasMore: hasMore,
+		}, nil
+	}
+
+	selected, err := tui.PickWithPagination("Select a flow to view:", fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}
@@ -933,7 +991,25 @@ func printStyledFlowInspection(cmd *cobra.Command, inspection *sdk.FlowInspectio
 	if inspection.Flow.Active {
 		status = "Active"
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "  Status: %s | Version: %s\n", valueStyle.Render(status), mutedStyle.Render(inspection.Flow.Version))
+
+	// Infer version if not set
+	versionDisplay := inspection.Flow.Version
+	if versionDisplay == "" {
+		// Infer based on action instance types
+		hasV1 := len(inspection.ActionInstances) > 0
+		hasV2 := len(inspection.ActionInstancesV2) > 0
+		if hasV2 && !hasV1 {
+			versionDisplay = "Unset (Assumed V2)"
+		} else if hasV1 && !hasV2 {
+			versionDisplay = "Unset (Assumed V1)"
+		} else if hasV1 && hasV2 {
+			versionDisplay = "Unset (Mixed V1/V2)"
+		} else {
+			versionDisplay = "Unset"
+		}
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "  Status: %s | Version: %s\n", valueStyle.Render(status), mutedStyle.Render(versionDisplay))
 	fmt.Fprintf(cmd.OutOrStdout(), "  Sys ID: %s\n", mutedStyle.Render(inspection.Flow.SysID))
 
 	// Show link if available
@@ -944,7 +1020,7 @@ func printStyledFlowInspection(cmd *cobra.Command, inspection *sdk.FlowInspectio
 
 	// Show Inputs/Outputs section only for subflows
 	isSubflow := strings.EqualFold(inspection.Flow.Type, "subflow")
-	if isSubflow && (len(inspection.FlowInputs) > 0 || len(inspection.FlowOutputs) > 0) {
+	if isSubflow {
 		fmt.Fprintln(cmd.OutOrStdout())
 		fmt.Fprintln(cmd.OutOrStdout(), triggerStyle.Render("▶ SUBFLOW"))
 		fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("─", 50))
@@ -977,7 +1053,7 @@ func printStyledFlowInspection(cmd *cobra.Command, inspection *sdk.FlowInspectio
 		}
 
 		// Show outputs
-		if isSubflow && len(inspection.FlowOutputs) > 0 {
+		if len(inspection.FlowOutputs) > 0 {
 			if len(inspection.FlowInputs) > 0 {
 				fmt.Fprintln(cmd.OutOrStdout())
 			}
@@ -1073,6 +1149,34 @@ func printStyledFlowInspection(cmd *cobra.Command, inspection *sdk.FlowInspectio
 		// Display time for scheduled triggers
 		if triggerTime != "" {
 			fmt.Fprintf(cmd.OutOrStdout(), "  %s: %s\n", mutedStyle.Render("Time"), mutedStyle.Render(triggerTime))
+		}
+
+		// Display trigger condition from payload if available
+		if len(inspection.Version) > 0 {
+			if payload, ok := inspection.Version["payload"].(string); ok && payload != "" {
+				var payloadData map[string]interface{}
+				if err := json.Unmarshal([]byte(payload), &payloadData); err == nil {
+					if triggerInstances, ok := payloadData["triggerInstances"].([]interface{}); ok && len(triggerInstances) > 0 {
+						if trigger, ok := triggerInstances[0].(map[string]interface{}); ok {
+							if inputs, ok := trigger["inputs"].([]interface{}); ok {
+								for _, input := range inputs {
+									if inputMap, ok := input.(map[string]interface{}); ok {
+										if name := getString(inputMap, "name"); name == "condition" {
+											conditionValue := getString(inputMap, "value")
+											if conditionValue != "" {
+												// Format the condition for display
+												formattedCondition := formatTriggerCondition(conditionValue)
+												fmt.Fprintf(cmd.OutOrStdout(), "  %s: %s\n", mutedStyle.Render("Condition"), valueStyle.Render(formattedCondition))
+											}
+											break
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -1384,6 +1488,11 @@ func printActionStep(cmd *cobra.Command, stepNum int, pad string, action map[str
 		}
 	}
 
+	// Strip flow name prefix from action names (e.g., "Software Procurement Flow : Add work notes" -> "Add work notes")
+	if idx := strings.Index(actionName, " : "); idx > 0 {
+		actionName = strings.TrimSpace(actionName[idx+3:])
+	}
+
 	// Build full action description
 	actionDisplay := actionName
 	if tableName != "" && actionName == "Update Record" {
@@ -1401,6 +1510,90 @@ func printActionStep(cmd *cobra.Command, stepNum int, pad string, action map[str
 		fmt.Fprintf(cmd.OutOrStdout(), "%s%d. %s (%s)\n", pad, stepNum, valueStyle.Render(actionDisplay), mutedStyle.Render(comment))
 	} else {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s%d. %s\n", pad, stepNum, valueStyle.Render(actionDisplay))
+	}
+
+	// Print input mappings if available (from V1 payload)
+	if inputs, ok := action["inputs"].([]interface{}); ok && len(inputs) > 0 {
+		for _, input := range inputs {
+			if inputMap, ok := input.(map[string]interface{}); ok {
+				inputName := getString(inputMap, "name")
+				inputValue := getString(inputMap, "value")
+				inputDisplay := getString(inputMap, "displayValue")
+
+				// Skip empty values or template variables that aren't set
+				if inputValue == "" && inputDisplay == "" {
+					continue
+				}
+
+				// Get the label from parameter if available
+				label := inputName
+				if param, ok := inputMap["parameter"].(map[string]interface{}); ok {
+					if paramLabel := getString(param, "label"); paramLabel != "" {
+						label = paramLabel
+					}
+				}
+
+				// Format the value for display
+				displayValue := inputDisplay
+				if displayValue == "" {
+					displayValue = inputValue
+				}
+
+				// Truncate if too long
+				if len(displayValue) > 50 {
+					displayValue = displayValue[:47] + "..."
+				}
+
+				// Skip table_name as it's already shown in the action header
+				if inputName == "table_name" {
+					continue
+				}
+
+				// Print the input mapping with extra indentation
+				fmt.Fprintf(cmd.OutOrStdout(), "%s    %s: %s\n", pad, mutedStyle.Render(label), valueStyle.Render(displayValue))
+			}
+		}
+	}
+
+	// Print input mappings from V2 values_decompressed if available
+	if valuesDecompressed, ok := action["values_decompressed"].([]map[string]interface{}); ok && len(valuesDecompressed) > 0 {
+		for _, inputMap := range valuesDecompressed {
+			inputName := getString(inputMap, "name")
+			inputValue := getString(inputMap, "value")
+			inputDisplay := getString(inputMap, "displayValue")
+
+			// Skip empty values
+			if inputValue == "" && inputDisplay == "" {
+				continue
+			}
+
+			// Get the label from parameter if available
+			label := inputName
+			if param, ok := inputMap["parameter"].(map[string]interface{}); ok {
+				if paramLabel := getString(param, "label"); paramLabel != "" {
+					label = paramLabel
+				}
+			}
+
+			// Format the value for display
+			displayValue := inputDisplay
+			if displayValue == "" {
+				displayValue = inputValue
+			}
+
+			// Truncate if too long
+			if len(displayValue) > 50 {
+				displayValue = displayValue[:47] + "..."
+			}
+
+			// Skip certain internal fields
+			if inputName == "table_name" || inputName == "request_item_id" {
+				continue
+			}
+
+			// Print the input mapping with extra indentation
+			fmt.Fprintf(cmd.OutOrStdout(), "%s    %s: %s\n", pad, mutedStyle.Render(label), valueStyle.Render(displayValue))
+		}
 	}
 }
 
@@ -1835,6 +2028,45 @@ func printMarkdownFlowInspection(cmd *cobra.Command, inspection *sdk.FlowInspect
 // getString safely extracts a string value from a map.
 // titleCase capitalizes the first letter of each space-separated word.
 // Replaces deprecated strings.Title for simple cases.
+// formatTriggerCondition formats an encoded ServiceNow condition query for display.
+// It converts encoded queries like "sys_class_name=sn_vsc_login_event^ORsys_class_name=sn_vsc_role_granted_event"
+// to human-readable format like "Event Type = Login Event OR Event Type = High Privilege Role Granted Event"
+func formatTriggerCondition(condition string) string {
+	if condition == "" {
+		return ""
+	}
+
+	// Simple formatting: replace encoded operators with readable ones
+	result := condition
+
+	// Replace OR operator
+	result = strings.ReplaceAll(result, "^OR", " OR ")
+
+	// Replace AND operator
+	result = strings.ReplaceAll(result, "^", " AND ")
+
+	// Replace comparison operators
+	result = strings.ReplaceAll(result, "=", " = ")
+	result = strings.ReplaceAll(result, "!=", " != ")
+	result = strings.ReplaceAll(result, ">=", " >= ")
+	result = strings.ReplaceAll(result, "<=", " <= ")
+	result = strings.ReplaceAll(result, ">", " > ")
+	result = strings.ReplaceAll(result, "<", " < ")
+	result = strings.ReplaceAll(result, "LIKE", " LIKE ")
+
+	// Clean up field names (convert sys_class_name to Event Type for common patterns)
+	if strings.Contains(result, "sys_class_name") {
+		result = strings.ReplaceAll(result, "sys_class_name", "Event Type")
+	}
+
+	// Clean up multiple spaces
+	for strings.Contains(result, "  ") {
+		result = strings.ReplaceAll(result, "  ", " ")
+	}
+
+	return strings.TrimSpace(result)
+}
+
 func titleCase(s string) string {
 	words := strings.Fields(s)
 	for i, w := range words {

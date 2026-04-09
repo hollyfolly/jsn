@@ -145,22 +145,15 @@ func initializeApp(cmd *cobra.Command) error {
 		return err
 	}
 
-	// First-run auto-setup: if no profiles exist, run setup
-	if len(cfg.Profiles) == 0 && !noInteractive && !agentMode {
+	// First-run auto-setup: if no profiles exist, prompt user to run setup
+	// Skip this check if the user is already running the setup command
+	if len(cfg.Profiles) == 0 && !noInteractive && !agentMode && cmd.Name() != "setup" {
 		if isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()) {
-			fmt.Fprintln(os.Stderr, "First run detected. Starting setup...")
-			setupCmd := commands.NewSetupCommand()
-			setupCmd.SetIn(cmd.InOrStdin())
-			setupCmd.SetOut(cmd.OutOrStdout())
-			setupCmd.SetErr(cmd.ErrOrStderr())
-			if err := setupCmd.Execute(); err != nil {
-				return fmt.Errorf("setup failed: %w", err)
-			}
-			// Reload config after setup
-			cfg, err = config.Load(cfgFile, profile)
-			if err != nil {
-				return err
-			}
+			fmt.Fprintln(os.Stderr, "First run detected. No profiles configured.")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "Please run: jsn setup")
+			fmt.Fprintln(os.Stderr, "")
+			return fmt.Errorf("no profiles configured - run 'jsn setup' to get started")
 		}
 	}
 

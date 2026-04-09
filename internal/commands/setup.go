@@ -42,7 +42,7 @@ This command will guide you through:
 
 func runSetup(cmd *cobra.Command, app *appctx.App) error {
 	if app == nil {
-		return fmt.Errorf("app not initialized")
+		return fmt.Errorf("setup cannot run: application context not initialized\n\nThis usually means there's an issue with the config system.\nTry one of the following:\n  1. Run 'jsn setup' directly instead of through another command\n  2. Delete ~/.config/servicenow/config.json and run 'jsn setup'\n  3. Check file permissions on your config directory")
 	}
 
 	fmt.Println()

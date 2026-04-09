@@ -1,9 +1,13 @@
 package sdk
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 )
 
@@ -572,9 +576,26 @@ func (c *Client) InspectFlow(ctx context.Context, flowID string) (*FlowInspectio
 	actionV2Query := url.Values{}
 	actionV2Query.Set("sysparm_query", fmt.Sprintf("flow=%s", flowID))
 	actionV2Query.Set("sysparm_fields", "sys_id,action_type,order,values,display_text")
+	actionV2Query.Set("sysparm_display_value", "all")
 	if resp, err := c.Get(ctx, "sys_hub_action_instance_v2", actionV2Query); err == nil {
 		inspection.ActionInstancesV2 = resp.Result
 		c.resolveActionTypeNames(ctx, inspection.ActionInstancesV2)
+		// Decompress values field for each action instance
+		for _, action := range inspection.ActionInstancesV2 {
+			// Try to get values as a display_value/value map first
+			var valueStr string
+			if valuesField, ok := action["values"].(map[string]interface{}); ok {
+				valueStr = getDisplayOrValue(valuesField, "value")
+			} else if strValue, ok := action["values"].(string); ok {
+				// Direct string value
+				valueStr = strValue
+			}
+			if valueStr != "" {
+				if decompressed, err := decompressFlowValues(valueStr); err == nil && decompressed != nil {
+					action["values_decompressed"] = decompressed
+				}
+			}
+		}
 	}
 
 	// Get flow logic instances — skip if version payload already provided them
@@ -583,7 +604,7 @@ func (c *Client) InspectFlow(ctx context.Context, flowID string) (*FlowInspectio
 		for _, table := range []string{"sys_hub_flow_logic", "sys_hub_flow_logic_instance_v2"} {
 			logicQuery := url.Values{}
 			logicQuery.Set("sysparm_query", fmt.Sprintf("flow=%s^ORDERBYorder", flowID))
-			logicQuery.Set("sysparm_fields", "sys_id,order,logic_definition,display_text,parent_ui_id,comment")
+			logicQuery.Set("sysparm_fields", "sys_id,order,logic_definition,display_text,parent_ui_id,comment,values")
 			logicQuery.Set("sysparm_display_value", "all")
 			logicQuery.Set("sysparm_limit", "50")
 			if resp, err := c.Get(ctx, table, logicQuery); err == nil {
@@ -597,6 +618,16 @@ func (c *Client) InspectFlow(ctx context.Context, flowID string) (*FlowInspectio
 						"display_text": getDisplayOrValue(record, "display_text"),
 						"parent_ui_id": getDisplayOrValue(record, "parent_ui_id"),
 						"source_table": table,
+					}
+					// Decompress values field for V2 logic instances
+					if table == "sys_hub_flow_logic_instance_v2" {
+						if valuesField, ok := record["values"].(map[string]interface{}); ok {
+							if valueStr := getDisplayOrValue(valuesField, "value"); valueStr != "" {
+								if decompressed, err := decompressFlowValues(valueStr); err == nil && decompressed != nil {
+									logicMap["values_decompressed"] = decompressed
+								}
+							}
+						}
 					}
 					inspection.FlowLogicInstances = append(inspection.FlowLogicInstances, logicMap)
 				}
@@ -676,4 +707,66 @@ func getDisplayOrValue(record map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// decompressFlowValues decompresses gzipped, base64-encoded flow data.
+// This handles the values field from sys_hub_action_instance_v2 and
+// sys_hub_flow_logic_instance_v2 tables.
+// Note: ServiceNow sometimes returns corrupted gzip data that cannot be
+// fully decompressed. In these cases, we return nil and the caller should
+// fall back to the flow version payload which contains the same data in plain JSON.
+func decompressFlowValues(value string) ([]map[string]interface{}, error) {
+	if value == "" {
+		return nil, nil
+	}
+
+	// Check if it looks like base64 (starts with common gzip magic bytes in base64)
+	// H4sI = gzip magic bytes in base64
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		// Not base64, try parsing as plain JSON
+		var result map[string]interface{}
+		if jsonErr := json.Unmarshal([]byte(value), &result); jsonErr == nil {
+			return []map[string]interface{}{result}, nil
+		}
+		return nil, fmt.Errorf("failed to decode value: %w", err)
+	}
+
+	// Try gzip decompress
+	reader, err := gzip.NewReader(bytes.NewReader(decoded))
+	if err != nil {
+		// Not gzipped, try parsing decoded bytes as JSON
+		var result []map[string]interface{}
+		if jsonErr := json.Unmarshal(decoded, &result); jsonErr == nil {
+			return result, nil
+		}
+		// Try as single object
+		var objResult map[string]interface{}
+		if jsonErr := json.Unmarshal(decoded, &objResult); jsonErr == nil {
+			return []map[string]interface{}{objResult}, nil
+		}
+		return nil, fmt.Errorf("failed to decompress value: %w", err)
+	}
+	defer reader.Close()
+
+	// Read decompressed data - ignore errors as ServiceNow sometimes sends
+	// corrupted gzip data with invalid checksums
+	decompressed, _ := io.ReadAll(reader)
+	if len(decompressed) == 0 {
+		return nil, fmt.Errorf("no data decompressed")
+	}
+
+	// Try to parse as JSON array
+	var result []map[string]interface{}
+	if err := json.Unmarshal(decompressed, &result); err == nil {
+		return result, nil
+	}
+
+	// Try as single object
+	var objResult map[string]interface{}
+	if err := json.Unmarshal(decompressed, &objResult); err == nil {
+		return []map[string]interface{}{objResult}, nil
+	}
+
+	return nil, fmt.Errorf("failed to parse decompressed JSON: %w", err)
 }
