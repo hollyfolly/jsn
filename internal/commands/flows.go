@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,25 +38,33 @@ func NewFlowsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "flows [<name_or_sys_id>] [variables]",
 		Short: "Manage Flow Designer flows",
-		Long: `List and inspect ServiceNow Flow Designer flows.
+		Long: `List, inspect, and create ServiceNow Flow Designer flows.
 
 Usage:
   jsn flows                                    Interactive picker (TTY) or usage info
   jsn flows <name_or_sys_id>                   Show flow details
   jsn flows <name_or_sys_id> variables         Show flow variables only
+  jsn flows create [flags]                     Create a new flow or subflow
   jsn flows --search <term>                    Fuzzy search on name (LIKE match)
-  jsn flows --query <encoded_query>            Raw ServiceNow encoded query
+  jsn flows --query <encoded_query>            Raw ServiceNow encoded query filter
 
 Filtering:
   --search <term>   Fuzzy search on name (LIKE match)
   --query <query>   Raw ServiceNow encoded query for advanced filtering
   --active          Show only active flows
 
+Subcommands:
+  create            Create a new flow or subflow
+  execute           Execute/test a flow
+  executions        Show flow execution history
+
 Examples:
   jsn flows "Approval Flow"
   jsn flows --search approval
   jsn flows --active --json
-  jsn flows --query "nameLIKEapproval^active=true" --limit 50`,
+  jsn flows --query "nameLIKEapproval^active=true" --limit 50
+  jsn flows create --name "My Flow" --type flow
+  jsn flows create --name "My Helper" --type subflow --input "id:string:ID:true"`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Mode 1: Direct lookup by name or sys_id
@@ -81,6 +91,8 @@ Examples:
 	cmd.AddCommand(
 		newFlowsExecutionsCmd(),
 		newFlowsExecuteCmd(),
+		newFlowsCreateCmd(),
+		newFlowsAddTriggerCmd(),
 	)
 
 	return cmd
@@ -2092,4 +2104,815 @@ func getString(m map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// flowsCreateFlags holds the flags for the flows create command.
+type flowsCreateFlags struct {
+	name        string
+	flowType    string
+	description string
+	active      bool
+	runAs       string
+	scope       string
+	inputs      []string
+	outputs     []string
+	interactive bool
+}
+
+// newFlowsCreateCmd creates the flows create command.
+func newFlowsCreateCmd() *cobra.Command {
+	var flags flowsCreateFlags
+
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create a new flow or subflow",
+		Long: `Create a new Flow Designer flow or subflow.
+
+Interactive Mode (default in TTY):
+  When running in a terminal without required flags, you'll be prompted
+  interactively to configure the flow step by step.
+
+Non-Interactive Mode (scripts/CI):
+  Use flags to specify all options. The --name flag is required.
+
+Examples:
+  # Interactive (TTY)
+  jsn flows create
+
+  # Non-interactive with flags
+  jsn flows create --name "My Flow" --type flow
+  jsn flows create --name "My Helper" --type subflow \
+    --input "record_id:string:Record ID:true" \
+    --output "result:boolean:Success"
+  jsn flows create --name "System Flow" --active --run-as system
+
+Input/Output Format:
+  --input "name:type:label:required"
+  --output "name:type:label"
+  
+  Types: string, integer, boolean, reference, choice, date, datetime
+  Required: true or false (default: false)`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFlowsCreate(cmd, flags)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.name, "name", "", "Flow name")
+	cmd.Flags().StringVar(&flags.flowType, "type", "flow", "Flow type: flow or subflow")
+	cmd.Flags().StringVar(&flags.description, "description", "", "Flow description")
+	cmd.Flags().BoolVar(&flags.active, "active", false, "Create as active")
+	cmd.Flags().StringVar(&flags.runAs, "run-as", "user", "Run as: user or system")
+	cmd.Flags().StringVar(&flags.scope, "scope", "", "Scope (defaults to current scope)")
+	cmd.Flags().StringArrayVar(&flags.inputs, "input", nil, "Input variable (format: name:type:label:required)")
+	cmd.Flags().StringArrayVar(&flags.outputs, "output", nil, "Output variable (format: name:type:label)")
+	cmd.Flags().BoolVar(&flags.interactive, "interactive", false, "Force interactive mode (default auto-detected)")
+
+	return cmd
+}
+
+// runFlowsCreate executes the flows create command.
+func runFlowsCreate(cmd *cobra.Command, flags flowsCreateFlags) error {
+	appCtx := appctx.FromContext(cmd.Context())
+	if appCtx == nil {
+		return fmt.Errorf("app not initialized")
+	}
+
+	if appCtx.SDK == nil {
+		return output.ErrAuth("no instance configured. Run: jsn setup")
+	}
+
+	outputWriter := appCtx.Output.(*output.Writer)
+	sdkClient := appCtx.SDK.(*sdk.Client)
+	isTerminal := output.IsTTY(cmd.OutOrStdout())
+
+	// Determine if we should use interactive mode
+	useInteractive := flags.interactive || (isTerminal && flags.name == "")
+
+	// Interactive mode: prompt for missing values
+	if useInteractive {
+		if err := interactiveFlowCreate(cmd, sdkClient, &flags); err != nil {
+			return err
+		}
+	}
+
+	// Validate required fields
+	if flags.name == "" {
+		return output.ErrUsage("flow name is required (use --name or run interactively in a terminal)")
+	}
+
+	// Parse inputs
+	var inputs []sdk.FlowVariableDef
+	for _, inputStr := range flags.inputs {
+		def, err := parseFlowVariableDef(inputStr, true)
+		if err != nil {
+			return output.ErrUsage(fmt.Sprintf("invalid input definition '%s': %v", inputStr, err))
+		}
+		inputs = append(inputs, def)
+	}
+
+	// Parse outputs
+	var outputs []sdk.FlowVariableDef
+	for _, outputStr := range flags.outputs {
+		def, err := parseFlowVariableDef(outputStr, false)
+		if err != nil {
+			return output.ErrUsage(fmt.Sprintf("invalid output definition '%s': %v", outputStr, err))
+		}
+		outputs = append(outputs, def)
+	}
+
+	// Create flow or subflow based on type
+	var flow *sdk.Flow
+	var err error
+
+	if flags.flowType == "subflow" {
+		flow, err = sdkClient.CreateSubflow(cmd.Context(), sdk.CreateSubflowOptions{
+			Name:        flags.name,
+			Description: flags.description,
+			Active:      flags.active,
+			RunAs:       flags.runAs,
+			Scope:       flags.scope,
+			Inputs:      inputs,
+			Outputs:     outputs,
+		})
+	} else {
+		if len(inputs) > 0 || len(outputs) > 0 {
+			return output.ErrUsage("inputs and outputs are only supported for subflows")
+		}
+		flow, err = sdkClient.CreateFlow(cmd.Context(), sdk.CreateFlowOptions{
+			Name:        flags.name,
+			Type:        flags.flowType,
+			Description: flags.description,
+			Active:      flags.active,
+			RunAs:       flags.runAs,
+			Scope:       flags.scope,
+		})
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to create flow: %w", err)
+	}
+
+	// Interactive mode: offer to add trigger and actions
+	if useInteractive && flags.flowType != "subflow" {
+		fmt.Fprintln(cmd.OutOrStdout())
+		fmt.Fprintln(cmd.OutOrStdout(), lipgloss.NewStyle().Bold(true).Foreground(output.BrandColor).Render("Flow Created!"))
+
+		addTrigger, _ := confirmPrompt("Would you like to add a trigger?")
+		if addTrigger {
+			if err := interactiveAddTrigger(cmd, sdkClient, flow.SysID); err != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "Warning: Could not add trigger: %v\n", err)
+			}
+		}
+	}
+
+	// Build summary
+	flowTypeStr := "Flow"
+	if flags.flowType == "subflow" {
+		flowTypeStr = "Subflow"
+	}
+
+	data := map[string]any{
+		"sys_id":      flow.SysID,
+		"name":        flow.Name,
+		"type":        flow.Type,
+		"active":      flow.Active,
+		"description": flow.Description,
+	}
+
+	if len(inputs) > 0 {
+		data["inputs"] = len(inputs)
+	}
+	if len(outputs) > 0 {
+		data["outputs"] = len(outputs)
+	}
+
+	return outputWriter.OK(data,
+		output.WithSummary(fmt.Sprintf("Created %s '%s'", flowTypeStr, flow.Name)),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("jsn flows %s", flow.SysID),
+				Description: "View flow details",
+			},
+			output.Breadcrumb{
+				Action:      "list",
+				Cmd:         "jsn flows",
+				Description: "List all flows",
+			},
+		),
+	)
+}
+
+// interactiveFlowCreate prompts the user for flow configuration interactively
+func interactiveFlowCreate(cmd *cobra.Command, sdkClient *sdk.Client, flags *flowsCreateFlags) error {
+	reader := bufio.NewReader(os.Stdin)
+
+	// Flow name
+	if flags.name == "" {
+		fmt.Print("Flow name: ")
+		name, _ := reader.ReadString('\n')
+		flags.name = strings.TrimSpace(name)
+	}
+
+	// Flow type
+	if flags.flowType == "flow" {
+		items := []tui.PickerItem{
+			{ID: "flow", Title: "Flow", Description: "Standard flow with trigger"},
+			{ID: "subflow", Title: "Subflow", Description: "Reusable flow with inputs/outputs"},
+		}
+		selected, err := tui.Pick("Select flow type:", items)
+		if err != nil || selected == nil {
+			return fmt.Errorf("flow type selection cancelled")
+		}
+		flags.flowType = selected.ID
+	}
+
+	// Description
+	if flags.description == "" {
+		fmt.Print("Description (optional): ")
+		desc, _ := reader.ReadString('\n')
+		flags.description = strings.TrimSpace(desc)
+	}
+
+	// Run as
+	if flags.runAs == "user" {
+		items := []tui.PickerItem{
+			{ID: "user", Title: "User", Description: "Run as the user who triggered the flow"},
+			{ID: "system", Title: "System", Description: "Run with system privileges"},
+		}
+		selected, err := tui.Pick("Run as:", items)
+		if err == nil && selected != nil {
+			flags.runAs = selected.ID
+		}
+	}
+
+	// Active
+	if !flags.active {
+		items := []tui.PickerItem{
+			{ID: "draft", Title: "Draft (inactive)", Description: "Create as draft, activate later"},
+			{ID: "active", Title: "Active", Description: "Activate immediately"},
+		}
+		selected, err := tui.Pick("Status:", items)
+		if err == nil && selected != nil {
+			flags.active = selected.ID == "active"
+		}
+	}
+
+	// Subflow inputs/outputs
+	if flags.flowType == "subflow" {
+		addInputs, _ := confirmPrompt("Would you like to add input variables?")
+		for addInputs {
+			input, err := interactiveVariableDef(reader, "input")
+			if err != nil {
+				break
+			}
+			def := fmt.Sprintf("%s:%s:%s:%v", input.Name, input.Type, input.Label, input.Mandatory)
+			flags.inputs = append(flags.inputs, def)
+			addInputs, _ = confirmPrompt("Add another input?")
+		}
+
+		addOutputs, _ := confirmPrompt("Would you like to add output variables?")
+		for addOutputs {
+			output, err := interactiveVariableDef(reader, "output")
+			if err != nil {
+				break
+			}
+			def := fmt.Sprintf("%s:%s:%s", output.Name, output.Type, output.Label)
+			flags.outputs = append(flags.outputs, def)
+			addOutputs, _ = confirmPrompt("Add another output?")
+		}
+	}
+
+	return nil
+}
+
+// interactiveVariableDef prompts for a variable definition
+func interactiveVariableDef(reader *bufio.Reader, direction string) (sdk.FlowVariableDef, error) {
+	var def sdk.FlowVariableDef
+
+	fmt.Printf("%s variable name: ", strings.Title(direction))
+	name, _ := reader.ReadString('\n')
+	def.Name = strings.TrimSpace(name)
+	if def.Name == "" {
+		return def, fmt.Errorf("name is required")
+	}
+
+	// Type selection
+	typeItems := []tui.PickerItem{
+		{ID: "string", Title: "String", Description: "Text value"},
+		{ID: "integer", Title: "Integer", Description: "Whole number"},
+		{ID: "boolean", Title: "Boolean", Description: "True/False"},
+		{ID: "reference", Title: "Reference", Description: "Reference to a table record"},
+		{ID: "choice", Title: "Choice", Description: "Selection from options"},
+		{ID: "date", Title: "Date", Description: "Date only"},
+		{ID: "datetime", Title: "Date/Time", Description: "Date and time"},
+	}
+	selected, err := tui.Pick("Variable type:", typeItems)
+	if err != nil || selected == nil {
+		return def, fmt.Errorf("type selection cancelled")
+	}
+	def.Type = selected.ID
+
+	// Reference table
+	if def.Type == "reference" {
+		fmt.Print("Reference table name (e.g., incident): ")
+		ref, _ := reader.ReadString('\n')
+		def.Reference = strings.TrimSpace(ref)
+	}
+
+	// Label
+	fmt.Printf("Display label [%s]: ", def.Name)
+	label, _ := reader.ReadString('\n')
+	def.Label = strings.TrimSpace(label)
+	if def.Label == "" {
+		def.Label = def.Name
+	}
+
+	// Required (only for inputs)
+	if direction == "input" {
+		items := []tui.PickerItem{
+			{ID: "optional", Title: "Optional", Description: "Not required"},
+			{ID: "required", Title: "Required", Description: "Must be provided"},
+		}
+		selected, _ := tui.Pick("Is this required?", items)
+		if selected != nil {
+			def.Mandatory = selected.ID == "required"
+		}
+	}
+
+	return def, nil
+}
+
+// confirmPrompt asks a yes/no question
+func confirmPrompt(question string) (bool, error) {
+	items := []tui.PickerItem{
+		{ID: "yes", Title: "Yes", Description: ""},
+		{ID: "no", Title: "No", Description: ""},
+	}
+	selected, err := tui.Pick(question, items, tui.WithAutoSelectSingle())
+	if err != nil || selected == nil {
+		return false, nil
+	}
+	return selected.ID == "yes", nil
+}
+
+// interactiveAddTrigger interactively configures a trigger for the flow
+func interactiveAddTrigger(cmd *cobra.Command, sdkClient *sdk.Client, flowID string) error {
+	// Trigger category selection
+	categoryItems := []tui.PickerItem{
+		{ID: "record", Title: "Record", Description: "Trigger when records change"},
+		{ID: "scheduled", Title: "Scheduled", Description: "Run on a schedule"},
+		{ID: "application", Title: "Application", Description: "Trigger from apps like Service Catalog"},
+	}
+
+	category, err := tui.Pick("Select trigger category:", categoryItems)
+	if err != nil || category == nil {
+		return nil
+	}
+
+	switch category.ID {
+	case "record":
+		return interactiveAddRecordTrigger(cmd, sdkClient, flowID)
+	case "scheduled":
+		return interactiveAddScheduledTrigger(cmd, sdkClient, flowID)
+	case "application":
+		return interactiveAddApplicationTrigger(cmd, sdkClient, flowID)
+	}
+
+	return nil
+}
+
+// interactiveAddRecordTrigger configures a record-based trigger
+func interactiveAddRecordTrigger(cmd *cobra.Command, sdkClient *sdk.Client, flowID string) error {
+	reader := bufio.NewReader(os.Stdin)
+
+	// Trigger type
+	typeItems := []tui.PickerItem{
+		{ID: "create", Title: "Created", Description: "When a new record is created"},
+		{ID: "update", Title: "Updated", Description: "When a record is updated"},
+		{ID: "create_or_update", Title: "Created or Updated", Description: "When a record is created or updated"},
+	}
+
+	triggerType, err := tui.Pick("When should this trigger?", typeItems)
+	if err != nil || triggerType == nil {
+		return nil
+	}
+
+	// Table name
+	fmt.Print("Table name (e.g., incident, change_request): ")
+	table, _ := reader.ReadString('\n')
+	table = strings.TrimSpace(table)
+	if table == "" {
+		return fmt.Errorf("table name is required")
+	}
+
+	// Condition (optional)
+	fmt.Print("Condition - when should it run? (optional, e.g., priority=1): ")
+	condition, _ := reader.ReadString('\n')
+	condition = strings.TrimSpace(condition)
+
+	// Show what we're about to do
+	fmt.Fprintf(cmd.OutOrStdout(), "\n")
+	fmt.Fprintf(cmd.OutOrStdout(), lipgloss.NewStyle().Bold(true).Foreground(output.BrandColor).Render("Creating trigger...")+"\n")
+
+	// Create the trigger via SDK
+	opts := sdk.CreateRecordTriggerOptions{
+		FlowID:    flowID,
+		Table:     table,
+		Operation: triggerType.ID,
+		Condition: condition,
+	}
+
+	if err := sdkClient.CreateRecordTrigger(cmd.Context(), opts); err != nil {
+		return fmt.Errorf("failed to create trigger: %w", err)
+	}
+
+	// Success message
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00aa00"))
+	fmt.Fprintf(cmd.OutOrStdout(), successStyle.Render("✓ Trigger created: %s on %s"), triggerType.Title, table)
+	if condition != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), " when %s", condition)
+	}
+	fmt.Fprintln(cmd.OutOrStdout())
+
+	return nil
+}
+
+// interactiveAddScheduledTrigger configures a scheduled trigger
+func interactiveAddScheduledTrigger(cmd *cobra.Command, sdkClient *sdk.Client, flowID string) error {
+	// Schedule type
+	typeItems := []tui.PickerItem{
+		{ID: "daily", Title: "Daily", Description: "Run every day"},
+		{ID: "weekly", Title: "Weekly", Description: "Run on specific days of the week"},
+		{ID: "monthly", Title: "Monthly", Description: "Run monthly"},
+		{ID: "once", Title: "Run Once", Description: "Run one time at a specific date/time"},
+		{ID: "repeat", Title: "Repeat", Description: "Repeat at intervals"},
+	}
+
+	scheduleType, err := tui.Pick("Schedule type:", typeItems)
+	if err != nil || scheduleType == nil {
+		return nil
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	opts := sdk.CreateScheduledTriggerOptions{
+		FlowID:   flowID,
+		Schedule: scheduleType.ID,
+	}
+
+	// Time input (only daily, weekly, monthly need it)
+	switch scheduleType.ID {
+	case "daily", "weekly", "monthly":
+		fmt.Fprint(cmd.OutOrStdout(), "  Time (HH:MM:SS, default 08:00:00): ")
+		timeStr, _ := reader.ReadString('\n')
+		timeStr = strings.TrimSpace(timeStr)
+		if timeStr != "" {
+			opts.Time = timeStr
+		}
+	}
+
+	// Type-specific inputs
+	switch scheduleType.ID {
+	case "weekly":
+		dayItems := []tui.PickerItem{
+			{ID: "1", Title: "Monday"},
+			{ID: "2", Title: "Tuesday"},
+			{ID: "3", Title: "Wednesday"},
+			{ID: "4", Title: "Thursday"},
+			{ID: "5", Title: "Friday"},
+			{ID: "6", Title: "Saturday"},
+			{ID: "7", Title: "Sunday"},
+		}
+		day, err := tui.Pick("Day of week:", dayItems)
+		if err != nil || day == nil {
+			return nil
+		}
+		opts.Day = day.ID
+
+	case "monthly":
+		fmt.Fprint(cmd.OutOrStdout(), "  Day of month (1-31): ")
+		dayStr, _ := reader.ReadString('\n')
+		dayStr = strings.TrimSpace(dayStr)
+		if dayStr == "" {
+			dayStr = "1"
+		}
+		opts.Day = dayStr
+
+	case "once":
+		fmt.Fprint(cmd.OutOrStdout(), "  Date/time (YYYY-MM-DD HH:MM:SS): ")
+		dateStr, _ := reader.ReadString('\n')
+		dateStr = strings.TrimSpace(dateStr)
+		if dateStr == "" {
+			return fmt.Errorf("date/time is required for run-once triggers")
+		}
+		opts.Date = dateStr
+
+	case "repeat":
+		fmt.Fprintln(cmd.OutOrStdout(), "  Repeat interval:")
+		fmt.Fprint(cmd.OutOrStdout(), "    Days (0-365, default 0): ")
+		daysStr, _ := reader.ReadString('\n')
+		daysStr = strings.TrimSpace(daysStr)
+		days := 0
+		if daysStr != "" {
+			if d, err := strconv.Atoi(daysStr); err == nil {
+				days = d
+			}
+		}
+
+		fmt.Fprint(cmd.OutOrStdout(), "    Hours (0-23, default 0): ")
+		hoursStr, _ := reader.ReadString('\n')
+		hoursStr = strings.TrimSpace(hoursStr)
+		hours := 0
+		if hoursStr != "" {
+			if h, err := strconv.Atoi(hoursStr); err == nil {
+				hours = h
+			}
+		}
+
+		fmt.Fprint(cmd.OutOrStdout(), "    Minutes (0-59, default 0): ")
+		minsStr, _ := reader.ReadString('\n')
+		minsStr = strings.TrimSpace(minsStr)
+		mins := 0
+		if minsStr != "" {
+			if m, err := strconv.Atoi(minsStr); err == nil {
+				mins = m
+			}
+		}
+
+		fmt.Fprint(cmd.OutOrStdout(), "    Seconds (0-59, default 0): ")
+		secsStr, _ := reader.ReadString('\n')
+		secsStr = strings.TrimSpace(secsStr)
+		secs := 0
+		if secsStr != "" {
+			if s, err := strconv.Atoi(secsStr); err == nil {
+				secs = s
+			}
+		}
+
+		if days == 0 && hours == 0 && mins == 0 && secs == 0 {
+			return fmt.Errorf("repeat interval must be greater than zero")
+		}
+
+		// ServiceNow encodes repeat interval as duration-since-epoch datetime:
+		// 1970-01-01 00:00:00 = 0, so add days to day 1, etc.
+		opts.Repeat = fmt.Sprintf("1970-01-%02d %02d:%02d:%02d", days+1, hours, mins, secs)
+	}
+
+	err = sdkClient.CreateScheduledTrigger(cmd.Context(), opts)
+	if err != nil {
+		return fmt.Errorf("failed to create scheduled trigger: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "\n  ✓ %s trigger added to flow\n", scheduleType.Title)
+
+	return nil
+}
+
+// interactiveAddApplicationTrigger configures an application trigger
+func interactiveAddApplicationTrigger(cmd *cobra.Command, sdkClient *sdk.Client, flowID string) error {
+	// Application type
+	typeItems := []tui.PickerItem{
+		{ID: "service_catalog", Title: "Service Catalog", Description: "Trigger from catalog item"},
+	}
+
+	appType, err := tui.Pick("Application:", typeItems)
+	if err != nil || appType == nil {
+		return nil
+	}
+
+	err = sdkClient.CreateApplicationTrigger(cmd.Context(), sdk.CreateApplicationTriggerOptions{
+		FlowID:      flowID,
+		Application: appType.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create application trigger: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "\n  ✓ %s trigger added to flow\n", appType.Title)
+
+	return nil
+}
+
+// parseFlowVariableDef parses a variable definition string.
+// Format for inputs: name:type:label:required
+// Format for outputs: name:type:label
+func parseFlowVariableDef(def string, isInput bool) (sdk.FlowVariableDef, error) {
+	parts := strings.Split(def, ":")
+	if len(parts) < 2 {
+		return sdk.FlowVariableDef{}, fmt.Errorf("expected format: name:type[:label][:required]")
+	}
+
+	result := sdk.FlowVariableDef{
+		Name: parts[0],
+		Type: parts[1],
+	}
+
+	if len(parts) >= 3 {
+		result.Label = parts[2]
+	}
+	if result.Label == "" {
+		result.Label = result.Name
+	}
+
+	if isInput && len(parts) >= 4 {
+		result.Mandatory = strings.ToLower(parts[3]) == "true"
+	}
+
+	return result, nil
+}
+
+// flowsAddTriggerFlags holds the flags for the flows add-trigger command.
+type flowsAddTriggerFlags struct {
+	triggerType string
+	table       string
+	condition   string
+	schedule    string // daily, weekly, monthly, once, repeat
+	time        string // HH:MM:SS for daily/weekly/monthly
+	day         string // day of week (1-7) or day of month (1-31)
+	date        string // YYYY-MM-DD HH:MM:SS for once
+	repeat      string // duration for repeat (e.g., "1970-01-02 06:00:00")
+}
+
+// newFlowsAddTriggerCmd creates the flows add-trigger command.
+func newFlowsAddTriggerCmd() *cobra.Command {
+	var flags flowsAddTriggerFlags
+
+	cmd := &cobra.Command{
+		Use:   "add-trigger <flow_name_or_sys_id>",
+		Short: "Add a trigger to an existing flow",
+		Long: `Add a trigger to an existing flow.
+
+Examples:
+  # Interactive mode (in TTY)
+  jsn flows add-trigger "My Flow"
+
+  # Record triggers (non-interactive)
+  jsn flows add-trigger "My Flow" --type record_create --table incident
+  jsn flows add-trigger "My Flow" --type record_update --table ticket --condition "priority=1"
+
+  # Scheduled triggers (non-interactive)
+  jsn flows add-trigger "My Flow" --schedule daily --time 08:00:00
+  jsn flows add-trigger "My Flow" --schedule weekly --day 3 --time 09:30:00
+  jsn flows add-trigger "My Flow" --schedule monthly --day 15 --time 14:00:00
+  jsn flows add-trigger "My Flow" --schedule once --date "2026-06-15 10:00:00"
+  jsn flows add-trigger "My Flow" --schedule repeat --repeat "1970-01-02 06:00:00"`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFlowsAddTrigger(cmd, args[0], flags)
+		},
+	}
+
+	cmd.Flags().StringVar(&flags.triggerType, "type", "", "Trigger type: record_create, record_update, record_create_or_update")
+	cmd.Flags().StringVar(&flags.table, "table", "", "Table name (e.g., incident, change_request)")
+	cmd.Flags().StringVar(&flags.condition, "condition", "", "Condition filter (optional, e.g., priority=1)")
+	cmd.Flags().StringVar(&flags.schedule, "schedule", "", "Schedule type: daily, weekly, monthly, once, repeat")
+	cmd.Flags().StringVar(&flags.time, "time", "", "Time to run (HH:MM:SS, default 08:00:00)")
+	cmd.Flags().StringVar(&flags.day, "day", "", "Day of week (1-7, 1=Mon) or day of month (1-31)")
+	cmd.Flags().StringVar(&flags.date, "date", "", "Date/time for run-once (YYYY-MM-DD HH:MM:SS)")
+	cmd.Flags().StringVar(&flags.repeat, "repeat", "", "Repeat interval as duration (e.g., 1970-01-02 06:00:00 = 1 day)")
+
+	return cmd
+}
+
+// runFlowsAddTrigger executes the flows add-trigger command.
+func runFlowsAddTrigger(cmd *cobra.Command, flowID string, flags flowsAddTriggerFlags) error {
+	appCtx := appctx.FromContext(cmd.Context())
+	if appCtx == nil {
+		return fmt.Errorf("app not initialized")
+	}
+
+	if appCtx.SDK == nil {
+		return output.ErrAuth("no instance configured. Run: jsn setup")
+	}
+
+	sdkClient := appCtx.SDK.(*sdk.Client)
+	isTerminal := output.IsTTY(cmd.OutOrStdout())
+
+	// Scheduled trigger path
+	if flags.schedule != "" {
+		opts := sdk.CreateScheduledTriggerOptions{
+			FlowID:   flowID,
+			Schedule: flags.schedule,
+			Time:     flags.time,
+			Day:      flags.day,
+			Date:     flags.date,
+			Repeat:   flags.repeat,
+		}
+
+		if err := sdkClient.CreateScheduledTrigger(cmd.Context(), opts); err != nil {
+			return fmt.Errorf("failed to create scheduled trigger: %w", err)
+		}
+
+		outputWriter := appCtx.Output.(*output.Writer)
+		return outputWriter.OK(map[string]interface{}{
+			"flow":     flowID,
+			"schedule": flags.schedule,
+		}, output.WithSummary(fmt.Sprintf("Added %s trigger to flow", flags.schedule)))
+	}
+
+	// Record trigger path: if not all flags provided and in TTY, use interactive mode
+	if isTerminal && (flags.triggerType == "" || flags.table == "") {
+		return interactiveAddRecordTriggerToFlow(cmd, sdkClient, flowID)
+	}
+
+	// Validate required flags
+	if flags.triggerType == "" {
+		return output.ErrUsage("trigger type is required (use --type or --schedule, or run interactively)")
+	}
+	if flags.table == "" {
+		return output.ErrUsage("table name is required (use --table or run interactively)")
+	}
+
+	// Map trigger type
+	triggerType := flags.triggerType
+	if triggerType == "create" {
+		triggerType = "record_create"
+	} else if triggerType == "update" {
+		triggerType = "record_update"
+	} else if triggerType == "create_or_update" {
+		triggerType = "record_create_or_update"
+	}
+
+	// Create the trigger
+	opts := sdk.CreateRecordTriggerOptions{
+		FlowID:    flowID,
+		Table:     flags.table,
+		Operation: triggerType,
+		Condition: flags.condition,
+	}
+
+	if err := sdkClient.CreateRecordTrigger(cmd.Context(), opts); err != nil {
+		return fmt.Errorf("failed to create trigger: %w", err)
+	}
+
+	// Success output
+	outputWriter := appCtx.Output.(*output.Writer)
+	return outputWriter.OK(map[string]interface{}{
+		"flow":      flowID,
+		"trigger":   triggerType,
+		"table":     flags.table,
+		"condition": flags.condition,
+	}, output.WithSummary(fmt.Sprintf("Added %s trigger on %s", triggerType, flags.table)))
+}
+
+// interactiveAddRecordTriggerToFlow interactively adds a trigger to an existing flow
+func interactiveAddRecordTriggerToFlow(cmd *cobra.Command, sdkClient *sdk.Client, flowID string) error {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(output.BrandColor).Render("Add Trigger to Flow"))
+	fmt.Println()
+
+	// Trigger type
+	typeItems := []tui.PickerItem{
+		{ID: "record_create", Title: "Created", Description: "When a new record is created"},
+		{ID: "record_update", Title: "Updated", Description: "When a record is updated"},
+		{ID: "record_create_or_update", Title: "Created or Updated", Description: "When a record is created or updated"},
+	}
+
+	triggerType, err := tui.Pick("When should this trigger?", typeItems)
+	if err != nil || triggerType == nil {
+		return nil
+	}
+
+	// Table name
+	fmt.Print("Table name (e.g., incident, change_request): ")
+	table, _ := reader.ReadString('\n')
+	table = strings.TrimSpace(table)
+	if table == "" {
+		return fmt.Errorf("table name is required")
+	}
+
+	// Condition (optional)
+	fmt.Print("Condition - when should it run? (optional, e.g., priority=1): ")
+	condition, _ := reader.ReadString('\n')
+	condition = strings.TrimSpace(condition)
+
+	// Show what we're about to do
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Bold(true).Foreground(output.BrandColor).Render("Creating trigger..."))
+
+	// Create the trigger via SDK
+	opts := sdk.CreateRecordTriggerOptions{
+		FlowID:    flowID,
+		Table:     table,
+		Operation: triggerType.ID,
+		Condition: condition,
+	}
+
+	if err := sdkClient.CreateRecordTrigger(cmd.Context(), opts); err != nil {
+		return fmt.Errorf("failed to create trigger: %w", err)
+	}
+
+	// Success message
+	fmt.Println()
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00aa00"))
+	fmt.Printf(successStyle.Render("✓ Trigger created: %s on %s"), triggerType.Title, table)
+	if condition != "" {
+		fmt.Printf(" when %s", condition)
+	}
+	fmt.Println()
+	fmt.Println()
+
+	return nil
 }

@@ -259,7 +259,7 @@ func TestFlowsSubcommands(t *testing.T) {
 	cmd := NewFlowsCmd()
 
 	// list and show were merged into the root command
-	subcommands := []string{"executions", "execute"}
+	subcommands := []string{"executions", "execute", "create"}
 	for _, name := range subcommands {
 		t.Run(name, func(t *testing.T) {
 			sub := findSubcommand(cmd, name)
