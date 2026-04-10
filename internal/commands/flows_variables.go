@@ -91,8 +91,8 @@ Examples:
 	cmd.Flags().BoolVar(&flags.mandatory, "mandatory", false, "Make variable required")
 	cmd.Flags().StringVar(&flags.defaultValue, "default", "", "Default value")
 
-	cmd.MarkFlagRequired("name")
-	cmd.MarkFlagRequired("type")
+	_ = cmd.MarkFlagRequired("name")
+	_ = cmd.MarkFlagRequired("type")
 
 	return cmd
 }

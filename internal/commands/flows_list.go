@@ -493,7 +493,9 @@ func pickFlow(ctx context.Context, sdkClient *sdk.Client, title string) (string,
 }
 
 // pickFlowFromList shows a picker from an already-fetched list of flows.
-func pickFlowFromList(flows []sdk.Flow) (string, error) {
+//
+//lint:ignore U1000 PickFlowFromList is used for future interactive picker needs
+func _pickFlowFromList(flows []sdk.Flow) (string, error) {
 	var items []tui.PickerItem
 	for _, f := range flows {
 		status := "Active"

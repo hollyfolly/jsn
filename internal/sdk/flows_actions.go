@@ -298,21 +298,18 @@ func buildCreateRecordInputs(table string, inputs map[string]string) string {
 // buildUpdateRecordInputs builds the inputs JSON for an Update Record action.
 // Values are set EMPTY on insert - the UPDATE mutation sets the actual values.
 func buildUpdateRecordInputs(table string, inputs map[string]string) string {
-	tableValue := table
-	if tableValue == "" {
-		tableValue = "incident"
-	}
-
 	// Insert with empty values - the actual values are set via UPDATE mutation
-	return fmt.Sprintf(`[{id: "4ed01916c31332002841b63b12d3aee1", name: "record", children: [], displayValue: {value: ""}, value: {value: ""}, parameter: {id: "4ed01916c31332002841b63b12d3aee1", label: "Record", name: "record", type: "document_id", type_label: "Document ID", hint: "", order: 10, extended: false, mandatory: true, readonly: false, maxsize: 40, data_structure: "", reference: "", reference_display: "", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: true, dependent_on: "table_name", show_ref_finder: false, local: false, attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,", sys_class_name: "", children: [], dynamic: null}}, {id: "b5d01916c31332002841b63b12d3aec9", name: "table_name", children: [], displayValue: {value: ""}, value: {value: ""}, parameter: {id: "b5d01916c31332002841b63b12d3aec9", label: "Table", name: "table_name", type: "table_name", type_label: "Table Name", hint: "", order: 50, extended: false, mandatory: true, readonly: false, maxsize: 80, data_structure: "", reference: "", reference_display: "", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: false, dependent_on: "", show_ref_finder: false, local: false, attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,", sys_class_name: "", children: [], dynamic: null}}, {id: "02d01916c31332002841b63b12d3aeee", name: "values", children: [], displayValue: {value: ""}, value: {value: ""}, parameter: {id: "02d01916c31332002841b63b12d3aeee", label: "Fields", name: "values", type: "template_value", type_label: "Template Value", hint: "", order: 100, extended: false, mandatory: true, readonly: false, maxsize: 16000000, data_structure: "", reference: "", reference_display: "", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: true, dependent_on: "table_name", show_ref_finder: false, local: false, attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,", sys_class_name: "", children: [], dynamic: null}}]`)
+	// The table parameter is not used here since we insert empty and update later
+	_ = table // Suppress unused variable warning
+	return `[{id: "4ed01916c31332002841b63b12d3aee1", name: "record", children: [], displayValue: {value: ""}, value: {value: ""}, parameter: {id: "4ed01916c31332002841b63b12d3aee1", label: "Record", name: "record", type: "document_id", type_label: "Document ID", hint: "", order: 10, extended: false, mandatory: true, readonly: false, maxsize: 40, data_structure: "", reference: "", reference_display: "", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: true, dependent_on: "table_name", show_ref_finder: false, local: false, attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,", sys_class_name: "", children: [], dynamic: null}}, {id: "b5d01916c31332002841b63b12d3aec9", name: "table_name", children: [], displayValue: {value: ""}, value: {value: ""}, parameter: {id: "b5d01916c31332002841b63b12d3aec9", label: "Table", name: "table_name", type: "table_name", type_label: "Table Name", hint: "", order: 50, extended: false, mandatory: true, readonly: false, maxsize: 80, data_structure: "", reference: "", reference_display: "", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: false, dependent_on: "", show_ref_finder: false, local: false, attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,", sys_class_name: "", children: [], dynamic: null}}, {id: "02d01916c31332002841b63b12d3aeee", name: "values", children: [], displayValue: {value: ""}, value: {value: ""}, parameter: {id: "02d01916c31332002841b63b12d3aeee", label: "Fields", name: "values", type: "template_value", type_label: "Template Value", hint: "", order: 100, extended: false, mandatory: true, readonly: false, maxsize: 16000000, data_structure: "", reference: "", reference_display: "", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: true, dependent_on: "table_name", show_ref_finder: false, local: false, attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,", sys_class_name: "", children: [], dynamic: null}}]`
 }
 
 // buildDeleteRecordInputs builds the inputs JSON for a Delete Record action.
 func buildDeleteRecordInputs(table string, inputs map[string]string) string {
-	tableValue := table
-	if tableValue == "" {
-		tableValue = "incident"
+	if table == "" {
+		table = "incident"
 	}
+	_ = table // Suppress unused variable warning - table not used in current return value
 
 	recordValue := ""
 	if rv, ok := inputs["record"]; ok {

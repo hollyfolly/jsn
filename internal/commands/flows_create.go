@@ -298,7 +298,11 @@ func interactiveFlowCreate(cmd *cobra.Command, sdkClient *sdk.Client, flags *flo
 func interactiveVariableDef(reader *bufio.Reader, direction string) (sdk.FlowVariableDef, error) {
 	var def sdk.FlowVariableDef
 
-	fmt.Printf("%s variable name: ", strings.Title(direction))
+	titleDirection := direction
+	if len(titleDirection) > 0 {
+		titleDirection = strings.ToUpper(string(direction[0])) + direction[1:]
+	}
+	fmt.Printf("%s variable name: ", titleDirection)
 	name, _ := reader.ReadString('\n')
 	def.Name = strings.TrimSpace(name)
 	if def.Name == "" {
