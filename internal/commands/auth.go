@@ -17,7 +17,6 @@ import (
 	"github.com/jacebenson/jsn/internal/output"
 	"github.com/jacebenson/jsn/internal/sdk"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -398,9 +397,9 @@ func readCurlHidden(reader *bufio.Reader) (string, error) {
 		return joinCurlLines(lines), nil
 	}
 
-	// Disable echo only (keep output processing intact so prints render immediately)
+	// Disable echo via raw mode (cross-platform)
 	fd := int(syscall.Stdin)
-	oldTermios, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		// Fallback to normal read
 		var lines []string
@@ -414,12 +413,7 @@ func readCurlHidden(reader *bufio.Reader) (string, error) {
 		return joinCurlLines(lines), nil
 	}
 
-	newTermios := *oldTermios
-	newTermios.Lflag &^= unix.ECHO | unix.ICANON
-	newTermios.Cc[unix.VMIN] = 1
-	newTermios.Cc[unix.VTIME] = 0
-	_ = unix.IoctlSetTermios(fd, unix.TCSETS, &newTermios)
-
+	// In raw mode, output processing is disabled, so use \r\n for newlines
 	fmt.Fprint(os.Stderr, "  (input hidden) ")
 
 	var lines []string
@@ -434,8 +428,8 @@ func readCurlHidden(reader *bufio.Reader) (string, error) {
 		b := buf[0]
 
 		if b == 0x03 { // Ctrl+C
-			_ = unix.IoctlSetTermios(fd, unix.TCSETS, oldTermios)
-			fmt.Fprintln(os.Stderr)
+			_ = term.Restore(fd, oldState)
+			fmt.Fprint(os.Stderr, "\r\n")
 			return "", fmt.Errorf("cancelled")
 		}
 		if b == 0x04 { // Ctrl+D
@@ -460,8 +454,8 @@ func readCurlHidden(reader *bufio.Reader) (string, error) {
 		}
 	}
 
-	_ = unix.IoctlSetTermios(fd, unix.TCSETS, oldTermios)
-	fmt.Fprintln(os.Stderr, "✓")
+	_ = term.Restore(fd, oldState)
+	fmt.Fprint(os.Stderr, "✓\r\n")
 
 	return joinCurlLines(lines), nil
 }
