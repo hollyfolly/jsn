@@ -134,6 +134,7 @@ Use --table <name> to specify the table.`, arg, arg, arg))
 func getTableFromFlags(cmd *cobra.Command, sdkClient *sdk.Client, prompt string) (string, error) {
 	table, _ := cmd.Flags().GetString("table")
 	if table != "" {
+		hintDedicatedCommand(cmd, table)
 		return table, nil
 	}
 
@@ -143,7 +144,45 @@ func getTableFromFlags(cmd *cobra.Command, sdkClient *sdk.Client, prompt string)
 		return "", output.ErrUsage("--table is required. Example: jsn records --table incident")
 	}
 
-	return pickTable(cmd.Context(), sdkClient, prompt)
+	table, err := pickTable(cmd.Context(), sdkClient, prompt)
+	if err != nil {
+		return "", err
+	}
+	hintDedicatedCommand(cmd, table)
+	return table, nil
+}
+
+// tableCommandHints maps ServiceNow table names to dedicated jsn commands.
+var tableCommandHints = map[string]string{
+	"sys_script":            "jsn rules",
+	"sys_script_client":     "jsn client-scripts",
+	"sys_script_include":    "jsn script-includes",
+	"sys_security_acl":      "jsn acls",
+	"sys_ui_policy":         "jsn ui-policies",
+	"sys_hub_flow":          "jsn flows",
+	"sys_trigger":           "jsn jobs",
+	"sysauto_script":        "jsn jobs",
+	"sysrule_assignment":    "jsn assignment-rules",
+	"sys_data_policy2":      "jsn data-policies",
+	"sys_decision":          "jsn decision-tables",
+	"sysevent_email_action": "jsn email-actions",
+	"sys_data_source":       "jsn import-sets",
+	"sys_ws_definition":     "jsn scripted-rest",
+	"sp_portal":             "jsn sp",
+	"sp_widget":             "jsn sp-widgets",
+	"sp_page":               "jsn sp-pages",
+	"sc_cat_item":           "jsn catalog-item",
+	"sys_dictionary":        "jsn tables columns",
+	"sys_db_object":         "jsn tables",
+	"sys_ui_script":         "jsn ui-scripts",
+	"sys_update_set":        "jsn updateset",
+}
+
+// hintDedicatedCommand prints a hint if there's a dedicated command for this table.
+func hintDedicatedCommand(cmd *cobra.Command, table string) {
+	if hint, ok := tableCommandHints[table]; ok {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Hint: try '%s' for a richer experience with this table\n\n", hint)
+	}
 }
 
 // runRecordsList executes the records list command.
