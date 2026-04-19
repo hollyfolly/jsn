@@ -117,6 +117,23 @@ func runUIPoliciesList(cmd *cobra.Command, flags uiPoliciesListFlags) error {
 	}
 	sysparmQuery := strings.Join(queryParts, "^")
 
+	// Determine output format
+	format := outputWriter.GetFormat()
+	isTerminal := output.IsTTY(cmd.OutOrStdout())
+
+	// Interactive mode - paginated picker, fetches on demand
+	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
+	if useInteractive {
+		selectedPolicy, err := pickUIPolicy(cmd.Context(), sdkClient, "Select a UI policy:", sysparmQuery, flags.order, flags.desc)
+		if err != nil {
+			return err
+		}
+		if selectedPolicy == "" {
+			return fmt.Errorf("no policy selected")
+		}
+		return runUIPoliciesShow(cmd, selectedPolicy)
+	}
+
 	// Set limit
 	limit := flags.limit
 	if flags.all {
@@ -134,24 +151,6 @@ func runUIPoliciesList(cmd *cobra.Command, flags uiPoliciesListFlags) error {
 	policies, err := sdkClient.ListUIPolicies(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("failed to list UI policies: %w", err)
-	}
-
-	// Determine output format
-	format := outputWriter.GetFormat()
-	isTerminal := output.IsTTY(cmd.OutOrStdout())
-
-	// Interactive mode - let user select a policy to view (auto-detect TTY)
-	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
-	if useInteractive {
-		selectedPolicy, err := pickUIPolicyFromList(policies)
-		if err != nil {
-			return err
-		}
-		if selectedPolicy == "" {
-			return fmt.Errorf("no policy selected")
-		}
-		// Show the selected policy
-		return runUIPoliciesShow(cmd, selectedPolicy)
 	}
 
 	if format == output.FormatStyled || (format == output.FormatAuto && isTerminal) {
@@ -334,7 +333,7 @@ func runUIPoliciesShow(cmd *cobra.Command, sysID string) error {
 			return output.ErrUsage("UI policy sys_id is required in non-interactive mode")
 		}
 
-		selectedPolicy, err := pickUIPolicy(cmd.Context(), sdkClient, "Select a UI policy:")
+		selectedPolicy, err := pickUIPolicy(cmd.Context(), sdkClient, "Select a UI policy:", "", "name", false)
 		if err != nil {
 			return err
 		}
@@ -605,17 +604,15 @@ func runUIPoliciesScript(cmd *cobra.Command, sysID string) error {
 }
 
 // pickUIPolicy shows an interactive UI policy picker and returns the selected policy sys_id.
-func pickUIPolicy(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
+func pickUIPolicy(ctx context.Context, sdkClient *sdk.Client, title, query, orderBy string, orderDesc bool) (string, error) {
 	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
-		q := ""
-		if searchQuery != "" {
-			q = "nameLIKE" + searchQuery
-		}
+		finalQuery := tui.MergeQuery(query, searchQuery, "nameLIKE")
 		opts := &sdk.ListUIPoliciesOptions{
-			Limit:   limit,
-			Offset:  offset,
-			Query:   q,
-			OrderBy: "name",
+			Limit:     limit,
+			Offset:    offset,
+			Query:     finalQuery,
+			OrderBy:   orderBy,
+			OrderDesc: orderDesc,
 		}
 		policies, err := sdkClient.ListUIPolicies(ctx, opts)
 		if err != nil {
@@ -648,32 +645,6 @@ func pickUIPolicy(ctx context.Context, sdkClient *sdk.Client, title string) (str
 	}
 	if selected == nil {
 		return "", fmt.Errorf("selection cancelled")
-	}
-
-	return selected.ID, nil
-}
-
-// pickUIPolicyFromList shows a picker from an already-fetched list of UI policies.
-func pickUIPolicyFromList(policies []sdk.UIPolicy) (string, error) {
-	var items []tui.PickerItem
-	for _, p := range policies {
-		status := "Active"
-		if !p.Active {
-			status = "Inactive"
-		}
-		items = append(items, tui.PickerItem{
-			ID:          p.SysID,
-			Title:       p.Name,
-			Description: fmt.Sprintf("%s - %s", p.Table, status),
-		})
-	}
-
-	selected, err := tui.Pick("Select a UI policy to view:", items, tui.WithMaxVisible(15))
-	if err != nil {
-		return "", err
-	}
-	if selected == nil {
-		return "", nil
 	}
 
 	return selected.ID, nil

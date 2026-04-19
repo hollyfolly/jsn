@@ -120,6 +120,23 @@ func runRulesList(cmd *cobra.Command, flags rulesListFlags) error {
 	}
 	sysparmQuery := strings.Join(queryParts, "^")
 
+	// Determine output format
+	format := outputWriter.GetFormat()
+	isTerminal := output.IsTTY(cmd.OutOrStdout())
+
+	// Interactive mode - paginated picker, fetches on demand
+	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
+	if useInteractive {
+		selectedRule, err := pickRule(cmd.Context(), sdkClient, "Select a business rule:", sysparmQuery, flags.order, flags.desc)
+		if err != nil {
+			return err
+		}
+		if selectedRule == "" {
+			return fmt.Errorf("no rule selected")
+		}
+		return runRulesShow(cmd, selectedRule)
+	}
+
 	// Set limit
 	limit := flags.limit
 	if flags.all {
@@ -136,24 +153,6 @@ func runRulesList(cmd *cobra.Command, flags rulesListFlags) error {
 	rules, err := sdkClient.ListRules(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("failed to list rules: %w", err)
-	}
-
-	// Determine output format
-	format := outputWriter.GetFormat()
-	isTerminal := output.IsTTY(cmd.OutOrStdout())
-
-	// Interactive mode - let user select a rule to view (auto-detect TTY)
-	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
-	if useInteractive {
-		selectedRule, err := pickRuleFromList(rules)
-		if err != nil {
-			return err
-		}
-		if selectedRule == "" {
-			return fmt.Errorf("no rule selected")
-		}
-		// Show the selected rule
-		return runRulesShow(cmd, selectedRule)
 	}
 
 	if format == output.FormatStyled || (format == output.FormatAuto && isTerminal) {
@@ -321,7 +320,7 @@ func runRulesShow(cmd *cobra.Command, sysID string) error {
 			return output.ErrUsage("Rule sys_id is required in non-interactive mode")
 		}
 
-		selectedRule, err := pickRule(cmd.Context(), sdkClient, "Select a business rule:")
+		selectedRule, err := pickRule(cmd.Context(), sdkClient, "Select a business rule:", "", "name", false)
 		if err != nil {
 			return err
 		}
@@ -556,17 +555,15 @@ func runRulesScript(cmd *cobra.Command, sysID string) error {
 }
 
 // pickRule shows an interactive rule picker and returns the selected rule sys_id.
-func pickRule(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
+func pickRule(ctx context.Context, sdkClient *sdk.Client, title, query, orderBy string, orderDesc bool) (string, error) {
 	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
-		q := ""
-		if searchQuery != "" {
-			q = "nameLIKE" + searchQuery
-		}
+		finalQuery := tui.MergeQuery(query, searchQuery, "nameLIKE")
 		opts := &sdk.ListRulesOptions{
-			Limit:   limit,
-			Offset:  offset,
-			Query:   q,
-			OrderBy: "name",
+			Limit:     limit,
+			Offset:    offset,
+			Query:     finalQuery,
+			OrderBy:   orderBy,
+			OrderDesc: orderDesc,
 		}
 		rules, err := sdkClient.ListRules(ctx, opts)
 		if err != nil {
@@ -599,32 +596,6 @@ func pickRule(ctx context.Context, sdkClient *sdk.Client, title string) (string,
 	}
 	if selected == nil {
 		return "", fmt.Errorf("selection cancelled")
-	}
-
-	return selected.ID, nil
-}
-
-// pickRuleFromList shows a picker from an already-fetched list of rules.
-func pickRuleFromList(rules []sdk.BusinessRule) (string, error) {
-	var items []tui.PickerItem
-	for _, r := range rules {
-		table := r.Collection
-		if table == "" {
-			table = "global"
-		}
-		items = append(items, tui.PickerItem{
-			ID:          r.SysID,
-			Title:       r.Name,
-			Description: fmt.Sprintf("%s - %s", table, r.When),
-		})
-	}
-
-	selected, err := tui.Pick("Select a rule to view:", items, tui.WithMaxVisible(15))
-	if err != nil {
-		return "", err
-	}
-	if selected == nil {
-		return "", nil
 	}
 
 	return selected.ID, nil

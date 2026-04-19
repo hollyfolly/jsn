@@ -126,6 +126,23 @@ func runJobsList(cmd *cobra.Command, flags jobsListFlags) error {
 	}
 	sysparmQuery := strings.Join(queryParts, "^")
 
+	// Determine output format
+	format := outputWriter.GetFormat()
+	isTerminal := output.IsTTY(cmd.OutOrStdout())
+
+	// Interactive mode - paginated picker, fetches on demand
+	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
+	if useInteractive {
+		selectedJob, err := pickJob(cmd.Context(), sdkClient, "Select a scheduled job:", table, sysparmQuery, flags.order, flags.desc)
+		if err != nil {
+			return err
+		}
+		if selectedJob == "" {
+			return fmt.Errorf("no job selected")
+		}
+		return runJobsShow(cmd, selectedJob, table)
+	}
+
 	// Set limit
 	limit := flags.limit
 	if flags.all {
@@ -143,24 +160,6 @@ func runJobsList(cmd *cobra.Command, flags jobsListFlags) error {
 	jobs, err := sdkClient.ListJobs(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("failed to list jobs: %w", err)
-	}
-
-	// Determine output format
-	format := outputWriter.GetFormat()
-	isTerminal := output.IsTTY(cmd.OutOrStdout())
-
-	// Interactive mode - let user select a job to view (auto-detect TTY)
-	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
-	if useInteractive {
-		selectedJob, err := pickJobFromList(cmd.Context(), sdkClient, jobs, table)
-		if err != nil {
-			return err
-		}
-		if selectedJob == "" {
-			return fmt.Errorf("no job selected")
-		}
-		// Show the selected job
-		return runJobsShow(cmd, selectedJob, table)
 	}
 
 	if format == output.FormatStyled || (format == output.FormatAuto && isTerminal) {
@@ -339,7 +338,7 @@ func runJobsShow(cmd *cobra.Command, sysID, jobType string) error {
 			return output.ErrUsage("Job sys_id is required in non-interactive mode")
 		}
 
-		selectedJob, err := pickJob(cmd.Context(), sdkClient, "Select a scheduled job:", table)
+		selectedJob, err := pickJob(cmd.Context(), sdkClient, "Select a scheduled job:", table, "", "name", false)
 		if err != nil {
 			return err
 		}
@@ -565,7 +564,7 @@ func runJobsExecutions(cmd *cobra.Command, sysID string, limit int) error {
 			return output.ErrUsage("Job sys_id is required in non-interactive mode")
 		}
 
-		selectedJob, err := pickJob(cmd.Context(), sdkClient, "Select a job to view executions:", "sys_trigger")
+		selectedJob, err := pickJob(cmd.Context(), sdkClient, "Select a job to view executions:", "sys_trigger", "", "name", false)
 		if err != nil {
 			return err
 		}
@@ -846,7 +845,7 @@ func runJobsRun(cmd *cobra.Command, sysID, jobType string) error {
 			return output.ErrUsage("Job sys_id is required in non-interactive mode")
 		}
 
-		selectedJob, err := pickJob(cmd.Context(), sdkClient, "Select a job to run:", table)
+		selectedJob, err := pickJob(cmd.Context(), sdkClient, "Select a job to run:", table, "", "name", false)
 		if err != nil {
 			return err
 		}
@@ -943,18 +942,16 @@ func runJobsScript(cmd *cobra.Command, sysID, jobType string) error {
 }
 
 // pickJob shows an interactive job picker and returns the selected job sys_id.
-func pickJob(ctx context.Context, sdkClient *sdk.Client, title, table string) (string, error) {
+func pickJob(ctx context.Context, sdkClient *sdk.Client, title, table, query, orderBy string, orderDesc bool) (string, error) {
 	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
-		q := ""
-		if searchQuery != "" {
-			q = "nameLIKE" + searchQuery
-		}
+		finalQuery := tui.MergeQuery(query, searchQuery, "nameLIKE")
 		opts := &sdk.ListJobsOptions{
-			Table:   table,
-			Limit:   limit,
-			Offset:  offset,
-			Query:   q,
-			OrderBy: "name",
+			Table:     table,
+			Limit:     limit,
+			Offset:    offset,
+			Query:     finalQuery,
+			OrderBy:   orderBy,
+			OrderDesc: orderDesc,
 		}
 		jobs, err := sdkClient.ListJobs(ctx, opts)
 		if err != nil {
@@ -987,33 +984,6 @@ func pickJob(ctx context.Context, sdkClient *sdk.Client, title, table string) (s
 	}
 	if selected == nil {
 		return "", fmt.Errorf("selection cancelled")
-	}
-
-	return selected.ID, nil
-}
-
-// pickJobFromList shows a picker from an already-fetched list of jobs.
-func pickJobFromList(ctx context.Context, sdkClient *sdk.Client, jobs []sdk.ScheduledJob, table string) (string, error) {
-	var items []tui.PickerItem
-	for _, j := range jobs {
-		status := "Active"
-		if !j.Active {
-			status = "Inactive"
-		}
-		items = append(items, tui.PickerItem{
-			ID:          j.SysID,
-			Title:       j.Name,
-			Description: fmt.Sprintf("%s - %s", j.JobType, status),
-		})
-	}
-
-	// Use a simple picker without pagination since we already have all items
-	selected, err := tui.Pick("Select a job to view:", items, tui.WithMaxVisible(15))
-	if err != nil {
-		return "", err
-	}
-	if selected == nil {
-		return "", nil
 	}
 
 	return selected.ID, nil

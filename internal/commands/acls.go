@@ -124,6 +124,23 @@ func runACLsList(cmd *cobra.Command, flags aclsListFlags) error {
 	}
 	sysparmQuery := strings.Join(queryParts, "^")
 
+	// Determine output format
+	format := outputWriter.GetFormat()
+	isTerminal := output.IsTTY(cmd.OutOrStdout())
+
+	// Interactive mode - paginated picker, fetches on demand
+	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
+	if useInteractive {
+		selectedACL, err := pickACL(cmd.Context(), sdkClient, "Select an ACL:", sysparmQuery, flags.order, flags.desc)
+		if err != nil {
+			return err
+		}
+		if selectedACL == "" {
+			return fmt.Errorf("no ACL selected")
+		}
+		return runACLsShow(cmd, selectedACL)
+	}
+
 	// Set limit
 	limit := flags.limit
 	if flags.all {
@@ -143,24 +160,6 @@ func runACLsList(cmd *cobra.Command, flags aclsListFlags) error {
 	acls, err := sdkClient.ListACLs(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("failed to list ACLs: %w", err)
-	}
-
-	// Determine output format
-	format := outputWriter.GetFormat()
-	isTerminal := output.IsTTY(cmd.OutOrStdout())
-
-	// Interactive mode - auto-detect TTY unless disabled or explicit format requested
-	// Show picker automatically in terminal when no explicit format is requested
-	if isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto {
-		selectedACL, err := pickACLFromList(acls)
-		if err != nil {
-			return err
-		}
-		if selectedACL == "" {
-			return fmt.Errorf("no ACL selected")
-		}
-		// Show the selected ACL
-		return runACLsShow(cmd, selectedACL)
 	}
 
 	if format == output.FormatStyled || (format == output.FormatAuto && isTerminal) {
@@ -330,7 +329,7 @@ func runACLsShow(cmd *cobra.Command, sysID string) error {
 			return output.ErrUsage("ACL sys_id is required in non-interactive mode")
 		}
 
-		selectedACL, err := pickACL(cmd.Context(), sdkClient, "Select an ACL:")
+		selectedACL, err := pickACL(cmd.Context(), sdkClient, "Select an ACL:", "", "name", false)
 		if err != nil {
 			return err
 		}
@@ -861,17 +860,15 @@ func printMarkdownACLCheck(cmd *cobra.Command, table, operation string, acls []s
 }
 
 // pickACL shows an interactive ACL picker and returns the selected ACL sys_id.
-func pickACL(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
+func pickACL(ctx context.Context, sdkClient *sdk.Client, title, query, orderBy string, orderDesc bool) (string, error) {
 	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
-		q := ""
-		if searchQuery != "" {
-			q = "nameLIKE" + searchQuery
-		}
+		q := tui.MergeQuery(query, searchQuery, "nameLIKE")
 		opts := &sdk.ListACLOptions{
-			Limit:   limit,
-			Offset:  offset,
-			Query:   q,
-			OrderBy: "name",
+			Limit:     limit,
+			Offset:    offset,
+			Query:     q,
+			OrderBy:   orderBy,
+			OrderDesc: orderDesc,
 		}
 		acls, err := sdkClient.ListACLs(ctx, opts)
 		if err != nil {
@@ -904,32 +901,6 @@ func pickACL(ctx context.Context, sdkClient *sdk.Client, title string) (string, 
 	}
 	if selected == nil {
 		return "", fmt.Errorf("selection cancelled")
-	}
-
-	return selected.ID, nil
-}
-
-// pickACLFromList shows a picker from an already-fetched list of ACLs.
-func pickACLFromList(acls []sdk.ACL) (string, error) {
-	var items []tui.PickerItem
-	for _, a := range acls {
-		status := "Active"
-		if !a.Active {
-			status = "Inactive"
-		}
-		items = append(items, tui.PickerItem{
-			ID:          a.SysID,
-			Title:       a.Name,
-			Description: fmt.Sprintf("%s - %s", a.Operation, status),
-		})
-	}
-
-	selected, err := tui.Pick("Select an ACL to view:", items, tui.WithMaxVisible(15))
-	if err != nil {
-		return "", err
-	}
-	if selected == nil {
-		return "", nil
 	}
 
 	return selected.ID, nil

@@ -109,6 +109,23 @@ func runScriptIncludesList(cmd *cobra.Command, flags scriptIncludesListFlags) er
 	}
 	sysparmQuery := strings.Join(queryParts, "^")
 
+	// Determine output format
+	format := outputWriter.GetFormat()
+	isTerminal := output.IsTTY(cmd.OutOrStdout())
+
+	// Interactive mode - paginated picker, fetches on demand
+	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
+	if useInteractive {
+		selectedScript, err := pickScriptInclude(cmd.Context(), sdkClient, "Select a script include:", sysparmQuery, flags.order, flags.desc)
+		if err != nil {
+			return err
+		}
+		if selectedScript == "" {
+			return fmt.Errorf("no script include selected")
+		}
+		return runScriptIncludesShow(cmd, selectedScript)
+	}
+
 	// Set limit
 	limit := flags.limit
 	if flags.all {
@@ -125,24 +142,6 @@ func runScriptIncludesList(cmd *cobra.Command, flags scriptIncludesListFlags) er
 	scripts, err := sdkClient.ListScriptIncludes(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("failed to list script includes: %w", err)
-	}
-
-	// Determine output format
-	format := outputWriter.GetFormat()
-	isTerminal := output.IsTTY(cmd.OutOrStdout())
-
-	// Interactive mode - let user select a script include to view (auto-detect TTY)
-	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
-	if useInteractive {
-		selectedScript, err := pickScriptIncludeFromList(scripts)
-		if err != nil {
-			return err
-		}
-		if selectedScript == "" {
-			return fmt.Errorf("no script include selected")
-		}
-		// Show the selected script include
-		return runScriptIncludesShow(cmd, selectedScript)
 	}
 
 	if format == output.FormatStyled || (format == output.FormatAuto && isTerminal) {
@@ -318,7 +317,7 @@ func runScriptIncludesShow(cmd *cobra.Command, name string) error {
 			return output.ErrUsage("Script include name is required in non-interactive mode")
 		}
 
-		selectedScript, err := pickScriptInclude(cmd.Context(), sdkClient, "Select a script include:")
+		selectedScript, err := pickScriptInclude(cmd.Context(), sdkClient, "Select a script include:", "", "name", false)
 		if err != nil {
 			return err
 		}
@@ -544,17 +543,15 @@ func runScriptIncludesScript(cmd *cobra.Command, identifier string) error {
 }
 
 // pickScriptInclude shows an interactive script include picker and returns the selected name.
-func pickScriptInclude(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
+func pickScriptInclude(ctx context.Context, sdkClient *sdk.Client, title, query, orderBy string, orderDesc bool) (string, error) {
 	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
-		q := ""
-		if searchQuery != "" {
-			q = "nameLIKE" + searchQuery
-		}
+		finalQuery := tui.MergeQuery(query, searchQuery, "nameLIKE")
 		opts := &sdk.ListScriptIncludesOptions{
-			Limit:   limit,
-			Offset:  offset,
-			Query:   q,
-			OrderBy: "name",
+			Limit:     limit,
+			Offset:    offset,
+			Query:     finalQuery,
+			OrderBy:   orderBy,
+			OrderDesc: orderDesc,
 		}
 		scripts, err := sdkClient.ListScriptIncludes(ctx, opts)
 		if err != nil {
@@ -590,39 +587,6 @@ func pickScriptInclude(ctx context.Context, sdkClient *sdk.Client, title string)
 	}
 	if selected == nil {
 		return "", fmt.Errorf("selection cancelled")
-	}
-
-	return selected.ID, nil
-}
-
-// pickScriptIncludeFromList shows a picker from an already-fetched list of script includes.
-func pickScriptIncludeFromList(scripts []sdk.ScriptInclude) (string, error) {
-	var items []tui.PickerItem
-	for _, s := range scripts {
-		scope := s.Scope
-		if scope == "" {
-			scope = s.SysScope
-		}
-		if scope == "" {
-			scope = "global"
-		}
-		status := "Active"
-		if !s.Active {
-			status = "Inactive"
-		}
-		items = append(items, tui.PickerItem{
-			ID:          s.Name,
-			Title:       s.Name,
-			Description: fmt.Sprintf("%s - %s", scope, status),
-		})
-	}
-
-	selected, err := tui.Pick("Select a script include to view:", items, tui.WithMaxVisible(15))
-	if err != nil {
-		return "", err
-	}
-	if selected == nil {
-		return "", nil
 	}
 
 	return selected.ID, nil

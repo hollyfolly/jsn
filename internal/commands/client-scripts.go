@@ -109,6 +109,23 @@ func runClientScriptsList(cmd *cobra.Command, flags clientScriptsListFlags) erro
 	}
 	sysparmQuery := strings.Join(queryParts, "^")
 
+	// Determine output format
+	format := outputWriter.GetFormat()
+	isTerminal := output.IsTTY(cmd.OutOrStdout())
+
+	// Interactive mode - paginated picker, fetches on demand
+	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
+	if useInteractive {
+		selectedScript, err := pickClientScript(cmd.Context(), sdkClient, "Select a client script:", sysparmQuery, flags.order, flags.desc)
+		if err != nil {
+			return err
+		}
+		if selectedScript == "" {
+			return fmt.Errorf("no script selected")
+		}
+		return runClientScriptsShow(cmd, selectedScript)
+	}
+
 	// Set limit
 	limit := flags.limit
 	if flags.all {
@@ -127,24 +144,6 @@ func runClientScriptsList(cmd *cobra.Command, flags clientScriptsListFlags) erro
 	scripts, err := sdkClient.ListClientScripts(cmd.Context(), opts)
 	if err != nil {
 		return fmt.Errorf("failed to list client scripts: %w", err)
-	}
-
-	// Determine output format
-	format := outputWriter.GetFormat()
-	isTerminal := output.IsTTY(cmd.OutOrStdout())
-
-	// Interactive mode - let user select a script to view (auto-detect TTY)
-	useInteractive := isTerminal && !appCtx.NoInteractive() && format == output.FormatAuto
-	if useInteractive {
-		selectedScript, err := pickClientScriptFromList(scripts)
-		if err != nil {
-			return err
-		}
-		if selectedScript == "" {
-			return fmt.Errorf("no script selected")
-		}
-		// Show the selected script
-		return runClientScriptsShow(cmd, selectedScript)
 	}
 
 	if format == output.FormatStyled || (format == output.FormatAuto && isTerminal) {
@@ -313,7 +312,7 @@ func runClientScriptsShow(cmd *cobra.Command, sysID string) error {
 			return output.ErrUsage("Client script sys_id is required in non-interactive mode")
 		}
 
-		selectedScript, err := pickClientScript(cmd.Context(), sdkClient, "Select a client script:")
+		selectedScript, err := pickClientScript(cmd.Context(), sdkClient, "Select a client script:", "", "name", false)
 		if err != nil {
 			return err
 		}
@@ -537,17 +536,15 @@ func runClientScriptsScript(cmd *cobra.Command, sysID string) error {
 }
 
 // pickClientScript shows an interactive client script picker and returns the selected script sys_id.
-func pickClientScript(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
+func pickClientScript(ctx context.Context, sdkClient *sdk.Client, title, query, orderBy string, orderDesc bool) (string, error) {
 	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
-		q := ""
-		if searchQuery != "" {
-			q = "nameLIKE" + searchQuery
-		}
+		finalQuery := tui.MergeQuery(query, searchQuery, "nameLIKE")
 		opts := &sdk.ListClientScriptsOptions{
-			Limit:   limit,
-			Offset:  offset,
-			Query:   q,
-			OrderBy: "name",
+			Limit:     limit,
+			Offset:    offset,
+			Query:     finalQuery,
+			OrderBy:   orderBy,
+			OrderDesc: orderDesc,
 		}
 		scripts, err := sdkClient.ListClientScripts(ctx, opts)
 		if err != nil {
@@ -580,32 +577,6 @@ func pickClientScript(ctx context.Context, sdkClient *sdk.Client, title string) 
 	}
 	if selected == nil {
 		return "", fmt.Errorf("selection cancelled")
-	}
-
-	return selected.ID, nil
-}
-
-// pickClientScriptFromList shows a picker from an already-fetched list of client scripts.
-func pickClientScriptFromList(scripts []sdk.ClientScript) (string, error) {
-	var items []tui.PickerItem
-	for _, s := range scripts {
-		status := "Active"
-		if !s.Active {
-			status = "Inactive"
-		}
-		items = append(items, tui.PickerItem{
-			ID:          s.SysID,
-			Title:       s.Name,
-			Description: fmt.Sprintf("%s - %s - %s", s.Table, s.Type, status),
-		})
-	}
-
-	selected, err := tui.Pick("Select a client script to view:", items, tui.WithMaxVisible(15))
-	if err != nil {
-		return "", err
-	}
-	if selected == nil {
-		return "", nil
 	}
 
 	return selected.ID, nil
