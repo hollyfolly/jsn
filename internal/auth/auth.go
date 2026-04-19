@@ -37,9 +37,23 @@ func (m *Manager) credentialKey() string {
 }
 
 // GetCredentials retrieves credentials for the active profile.
-// Checks SERVICENOW_TOKEN env var first, then stored credentials.
+// Checks SERVICENOW_TOKEN and SERVICENOW_OAUTH_TOKEN env vars first, then stored credentials.
 func (m *Manager) GetCredentials() (*Credentials, error) {
-	// Check for SERVICENOW_TOKEN environment variable first
+	// Check for SERVICENOW_OAUTH_TOKEN environment variable first (OAuth)
+	if token := os.Getenv("SERVICENOW_OAUTH_TOKEN"); token != "" {
+		creds := &Credentials{
+			AuthMethod:  "oauth",
+			AccessToken: token,
+			CreatedAt:   0,
+		}
+		// Optionally get refresh token from env
+		if refresh := os.Getenv("SERVICENOW_OAUTH_REFRESH_TOKEN"); refresh != "" {
+			creds.RefreshToken = refresh
+		}
+		return creds, nil
+	}
+
+	// Check for SERVICENOW_TOKEN environment variable (Basic Auth / g_ck)
 	if token := os.Getenv("SERVICENOW_TOKEN"); token != "" {
 		return &Credentials{
 			Token:     token,
@@ -52,7 +66,24 @@ func (m *Manager) GetCredentials() (*Credentials, error) {
 		return nil, fmt.Errorf("no active profile configured")
 	}
 
-	return m.store.Load(credKey)
+	creds, err := m.store.Load(credKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// Auto-refresh OAuth token if needed
+	if creds.IsOAuth() && creds.NeedsRefresh() && creds.RefreshToken != "" {
+		profile := m.cfg.GetActiveProfile()
+		if profile != nil {
+			refreshed, err := m.RefreshOAuthToken(profile.InstanceURL, creds)
+			if err == nil && refreshed != nil {
+				return refreshed, nil
+			}
+			// If refresh fails, return original credentials (will fail on API call)
+		}
+	}
+
+	return creds, nil
 }
 
 // StoreCredentials stores credentials for the active profile.
@@ -77,7 +108,12 @@ func (m *Manager) DeleteCredentials() error {
 
 // IsAuthenticated checks if there are valid credentials for the active profile.
 func (m *Manager) IsAuthenticated() bool {
-	// Check for SERVICENOW_TOKEN environment variable first
+	// Check for OAuth token in environment variable first
+	if os.Getenv("SERVICENOW_OAUTH_TOKEN") != "" {
+		return true
+	}
+
+	// Check for SERVICENOW_TOKEN environment variable (Basic Auth / g_ck)
 	if os.Getenv("SERVICENOW_TOKEN") != "" {
 		return true
 	}
@@ -91,7 +127,8 @@ func (m *Manager) IsAuthenticated() bool {
 	if err != nil {
 		return false
 	}
-	return creds.Token != ""
+	// Check for OAuth or Basic Auth / g_ck tokens
+	return creds.AccessToken != "" || creds.Token != ""
 }
 
 // GetStore returns the credential store.
@@ -107,6 +144,33 @@ type Credentials struct {
 	ExpiresAt  int64  `json:"expires_at,omitempty"`
 	CreatedAt  int64  `json:"created_at"`
 	LastTested int64  `json:"last_tested,omitempty"`
+	// OAuth-specific fields
+	AuthMethod   string `json:"auth_method,omitempty"` // "basic", "gck", or "oauth"
+	AccessToken  string `json:"access_token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	TokenType    string `json:"token_type,omitempty"`
+}
+
+// IsOAuth returns true if these credentials use OAuth authentication
+func (c *Credentials) IsOAuth() bool {
+	return c.AuthMethod == "oauth" || c.AccessToken != ""
+}
+
+// IsExpired returns true if the OAuth token is expired or expires within the given buffer
+func (c *Credentials) IsExpired(bufferSeconds int64) bool {
+	if c.ExpiresAt == 0 {
+		return false
+	}
+	return time.Now().Unix()+bufferSeconds >= c.ExpiresAt
+}
+
+// NeedsRefresh returns true if the OAuth token should be refreshed
+// (expires within 15 minutes)
+func (c *Credentials) NeedsRefresh() bool {
+	if c.RefreshToken == "" {
+		return false
+	}
+	return c.IsExpired(15 * 60)
 }
 
 // GetCredentialsForProfile retrieves credentials for a specific profile by instance URL.
@@ -139,4 +203,34 @@ func (m *Manager) UpdateLastTested() error {
 
 	creds.LastTested = time.Now().Unix()
 	return m.store.Save(credKey, creds)
+}
+
+// RefreshOAuthToken refreshes an OAuth access token using the refresh token
+func (m *Manager) RefreshOAuthToken(instanceURL string, creds *Credentials) (*Credentials, error) {
+	if creds.RefreshToken == "" {
+		return nil, fmt.Errorf("no refresh token available")
+	}
+
+	clientID := GetOAuthClientID()
+	tokenResp, err := RefreshAccessToken(instanceURL, clientID, creds.RefreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	// Update credentials with new tokens
+	creds.AccessToken = tokenResp.AccessToken
+	creds.RefreshToken = tokenResp.RefreshToken
+	creds.TokenType = tokenResp.TokenType
+	creds.ExpiresAt = time.Now().Unix() + int64(tokenResp.ExpiresIn)
+
+	// Store updated credentials
+	credKey := m.credentialKey()
+	if credKey != "" {
+		if err := m.store.Save(credKey, creds); err != nil {
+			// Log but don't fail - we still have valid credentials in memory
+			fmt.Fprintf(os.Stderr, "warning: failed to store refreshed credentials: %v\n", err)
+		}
+	}
+
+	return creds, nil
 }

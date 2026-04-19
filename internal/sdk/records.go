@@ -157,3 +157,20 @@ func (c *Client) GetRecordByNumber(ctx context.Context, table, number string) (m
 
 	return resp.Result[0], nil
 }
+
+// CountVersions returns the number of versions for a given record.
+// Versions are stored in sys_update_version with name format: <table>_<sys_id>
+func (c *Client) CountVersions(ctx context.Context, table, sysID string) (int, error) {
+	query := url.Values{}
+	query.Set("sysparm_query", fmt.Sprintf("name=%s_%s", table, sysID))
+	// Don't set a limit - we want all versions to count them
+	// ServiceNow has a default limit but for version counting this should be fine
+
+	resp, err := c.Get(ctx, "sys_update_version", query)
+	if err != nil {
+		return 0, err
+	}
+
+	// Return the count of results
+	return len(resp.Result), nil
+}

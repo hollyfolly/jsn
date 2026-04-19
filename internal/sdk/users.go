@@ -25,27 +25,62 @@ type UserPreference struct {
 }
 
 // GetCurrentUser retrieves the currently authenticated user.
-// Uses gs.getUserID() via background script to get the actual current user's sys_id,
-// then queries sys_user for the full user record.
+// First tries background script (for session-based auth), then falls back to
+// querying sys_user with JavaScript query (for OAuth).
 func (c *Client) GetCurrentUser(ctx context.Context) (*User, error) {
-	// Use background script to get the current user's sys_id
+	// Try background script first (works with basic auth and g_ck)
+	user, err := c.getCurrentUserViaEval(ctx)
+	if err == nil && user != nil {
+		return user, nil
+	}
+
+	// Fall back to JavaScript query (works with OAuth)
+	return c.getCurrentUserViaQuery(ctx)
+}
+
+// getCurrentUserViaEval uses background script to get current user (session-based auth)
+func (c *Client) getCurrentUserViaEval(ctx context.Context) (*User, error) {
 	script := "gs.print(gs.getUserID());"
 	result, err := c.Eval(ctx, script, DefaultEvalOptions())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get current user ID: %w", err)
+		return nil, err
 	}
 
 	if result.Error != "" {
 		return nil, fmt.Errorf("script error: %s", result.Error)
 	}
 
-	// Parse the output to get the sys_id
 	userID := strings.TrimSpace(result.Output)
 	if userID == "" {
-		return nil, fmt.Errorf("could not determine current user ID")
+		return nil, fmt.Errorf("empty user ID")
 	}
 
-	// Query sys_user for the full user record
+	return c.getUserByID(ctx, userID)
+}
+
+// getCurrentUserViaQuery uses JavaScript query to get current user (OAuth-compatible)
+func (c *Client) getCurrentUserViaQuery(ctx context.Context) (*User, error) {
+	// Query sys_user using JavaScript to get current user
+	query := url.Values{}
+	query.Set("sysparm_limit", "1")
+	query.Set("sysparm_fields", "sys_id,user_name,name,email")
+	query.Set("sysparm_query", "sys_id=javascript:gs.getUserID()")
+
+	resp, err := c.Get(ctx, "sys_user", query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query current user: %w", err)
+	}
+
+	if len(resp.Result) == 0 {
+		return nil, fmt.Errorf("current user not found")
+	}
+
+	user := userFromRecord(resp.Result[0])
+	return &user, nil
+}
+
+// getUserByID retrieves a user by sys_id
+func (c *Client) getUserByID(ctx context.Context, userID string) (*User, error) {
 	query := url.Values{}
 	query.Set("sysparm_limit", "1")
 	query.Set("sysparm_fields", "sys_id,user_name,name,email")
@@ -129,7 +164,21 @@ func (c *Client) SetCurrentUpdateSet(ctx context.Context, userID, updateSetSysID
 }
 
 // GetCurrentApplication retrieves the current application scope for the user.
+// Gets the scope from the current update set (which reflects the actual working scope).
 func (c *Client) GetCurrentApplication(ctx context.Context, userID string) (*Application, error) {
+	// First try to get the application from the current update set
+	updateSet, err := c.GetCurrentUpdateSet(ctx, userID)
+	if err == nil && updateSet != nil && updateSet.Application != "" {
+		// Look up the application by sys_id
+		return c.GetApplication(ctx, updateSet.Application)
+	}
+
+	// Fall back to user preference
+	return c.getCurrentApplicationViaPreference(ctx, userID)
+}
+
+// getCurrentApplicationViaPreference reads from user preferences
+func (c *Client) getCurrentApplicationViaPreference(ctx context.Context, userID string) (*Application, error) {
 	pref, err := c.GetUserPreference(ctx, userID, "apps.current_app")
 	if err != nil {
 		return nil, err

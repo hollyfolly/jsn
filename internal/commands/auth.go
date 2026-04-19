@@ -25,6 +25,7 @@ func NewAuthCommand() *cobra.Command {
 		Long: `Manage ServiceNow authentication including login, logout, and status.
 
 Authentication methods:
+  - OAuth: Browser-based OAuth 2.0 with PKCE (recommended, most secure)
   - Basic Auth: Username and password
   - g_ck Token: Session token from browser
 
@@ -56,13 +57,14 @@ func newAuthLoginCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate with the active ServiceNow profile",
-		Long: `Authenticate with your ServiceNow instance using either Basic Auth, g_ck token, or by pasting a curl command.
+		Long: `Authenticate with your ServiceNow instance using either Basic Auth, OAuth, g_ck token, or by pasting a curl command.
 
 This command authenticates using the active profile's instance URL.
 To set up a profile first, use: jsn setup
 
 Authentication methods:
   - Basic Auth: Username and password
+  - OAuth: Browser-based OAuth 2.0 with PKCE (most secure)
   - g_ck Token: Paste curl command from browser DevTools
   - From curl: Copy a request as curl from browser Network tab
 
@@ -82,20 +84,23 @@ To get auth from curl:
 			authManager := app.Auth.(*auth.Manager)
 
 			// Handle curl-based login - read from flag, args, or stdin
-			if curlCmd == "" && len(args) > 0 {
-				curlCmd = args[0]
-			}
-			if curlCmd == "" {
-				// Check if there's data on stdin
-				stat, _ := os.Stdin.Stat()
-				if (stat.Mode() & os.ModeCharDevice) == 0 {
-					// stdin has data, read it
-					data, _ := io.ReadAll(os.Stdin)
-					curlCmd = strings.TrimSpace(string(data))
+			// Only check for curl if method is not explicitly set to oauth
+			if method != "oauth" {
+				if curlCmd == "" && len(args) > 0 {
+					curlCmd = args[0]
 				}
-			}
-			if curlCmd != "" {
-				return loginFromCurl(cmd, cfg, authManager, curlCmd)
+				if curlCmd == "" {
+					// Check if there's data on stdin
+					stat, _ := os.Stdin.Stat()
+					if (stat.Mode() & os.ModeCharDevice) == 0 {
+						// stdin has data, read it
+						data, _ := io.ReadAll(os.Stdin)
+						curlCmd = strings.TrimSpace(string(data))
+					}
+				}
+				if curlCmd != "" {
+					return loginFromCurl(cmd, cfg, authManager, curlCmd)
+				}
 			}
 
 			// Get active profile
@@ -114,23 +119,45 @@ To get auth from curl:
 				} else {
 					fmt.Println("\nChoose authentication method:")
 					fmt.Println("  1) Basic Auth (username/password)")
-					fmt.Println("  2) g_ck Token (glide cookie from browser)")
-					fmt.Print("\nMethod [1]: ")
+					fmt.Println("  2) OAuth (browser-based, most secure)")
+					fmt.Println("  3) g_ck Token (glide cookie from browser)")
+					fmt.Print("\nMethod [2]: ")
 
 					input, _ := reader.ReadString('\n')
 					input = strings.TrimSpace(input)
 
-					if input == "" || input == "1" {
+					if input == "" || input == "2" {
+						method = "oauth"
+					} else if input == "1" {
 						method = "basic"
-					} else if input == "2" {
+					} else if input == "3" {
 						method = "gck"
 					} else {
-						method = "basic"
+						method = "oauth"
 					}
 				}
 			}
 
-			if method == "basic" {
+			if method == "oauth" {
+				// OAuth flow
+				creds, err := auth.OAuthFlow(instanceURL)
+				if err != nil {
+					return output.ErrAuth(fmt.Sprintf("OAuth authentication failed: %v", err))
+				}
+
+				if err := authManager.StoreCredentials(creds); err != nil {
+					return output.ErrAuth(fmt.Sprintf("failed to store credentials: %v", err))
+				}
+
+				// Update profile with auth method
+				profile.AuthMethod = "oauth"
+				if err := cfg.Save(); err != nil {
+					return output.ErrAPI(500, fmt.Sprintf("failed to save config: %v", err))
+				}
+
+				fmt.Printf("\nSuccessfully authenticated with %s (OAuth)\n", instanceURL)
+				return nil
+			} else if method == "basic" {
 				// Basic Auth flow
 				if username == "" {
 					// Use username from profile if available
@@ -206,7 +233,7 @@ To get auth from curl:
 	cmd.Flags().StringVar(&username, "username", "", "Username (for Basic Auth)")
 	cmd.Flags().StringVar(&password, "password", "", "Password (for Basic Auth)")
 	cmd.Flags().StringVar(&token, "token", "", "g_ck token")
-	cmd.Flags().StringVar(&method, "method", "", "Auth method (basic or gck)")
+	cmd.Flags().StringVar(&method, "method", "", "Auth method (basic, oauth, or gck)")
 	cmd.Flags().StringVar(&curlCmd, "curl", "", "Paste a curl command from browser DevTools")
 
 	return cmd
@@ -480,6 +507,7 @@ and displays the results in a simple table format.`,
 				Profile    string `json:"profile"`
 				Instance   string `json:"instance"`
 				User       string `json:"user"`
+				AuthType   string `json:"auth_type"`
 				StatusCode int    `json:"status_code"`
 				Status     string `json:"status"`
 			}
@@ -500,26 +528,57 @@ and displays the results in a simple table format.`,
 
 				// Check if we have credentials
 				creds, err := authManager.GetCredentialsForProfile(profile.InstanceURL)
-				if err != nil || creds == nil || creds.Token == "" {
+				if err != nil || creds == nil || (creds.Token == "" && creds.AccessToken == "") {
 					result.StatusCode = 0
 					result.Status = "no credentials"
+					result.AuthType = profile.AuthMethod
+					if result.AuthType == "" {
+						result.AuthType = "-"
+					}
 					results = append(results, result)
 					continue
 				}
 
+				// Determine auth method
+				authMethod := profile.AuthMethod
+				if creds.AuthMethod != "" {
+					authMethod = creds.AuthMethod
+				}
+				result.AuthType = authMethod
+				if result.AuthType == "" {
+					result.AuthType = "basic"
+				}
+
 				// Create a temporary SDK client for this profile
-				testClient := sdk.NewClient(profile.InstanceURL, func() (string, string, bool) {
-					if profile.AuthMethod == "gck" {
-						return creds.Token, creds.Cookies, true
+				testClient := sdk.NewClient(profile.InstanceURL, func() (string, string, string) {
+					switch authMethod {
+					case "oauth":
+						return creds.AccessToken, "", "oauth"
+					case "gck":
+						return creds.Token, creds.Cookies, "gck"
+					default:
+						return creds.Token, creds.Username, "basic"
 					}
-					return creds.Token, creds.Username, false
 				})
 
-				// Test the connection
+				// Test the connection - try to get current user
 				user, err := testClient.GetCurrentUser(cmd.Context())
 				if err != nil {
-					result.StatusCode = 401
-					result.Status = "auth failed"
+					// For OAuth, try a simpler API call as fallback
+					if authMethod == "oauth" {
+						_, _, apiErr := testClient.RawRequest(cmd.Context(), "GET", "/api/now/table/sys_user?sysparm_limit=1", nil, nil)
+						if apiErr == nil {
+							result.StatusCode = 200
+							result.Status = "ok"
+							result.User = "OAuth User"
+						} else {
+							result.StatusCode = 401
+							result.Status = "auth failed"
+						}
+					} else {
+						result.StatusCode = 401
+						result.Status = "auth failed"
+					}
 				} else {
 					result.StatusCode = 200
 					result.Status = "ok"
@@ -544,8 +603,8 @@ and displays the results in a simple table format.`,
 			}
 
 			// Print simple table output
-			fmt.Printf("%-20s %-35s %-20s %s\n", "PROFILE", "INSTANCE", "USER", "STATUS")
-			fmt.Println(strings.Repeat("-", 90))
+			fmt.Printf("%-20s %-35s %-10s %-20s %s\n", "PROFILE", "INSTANCE", "TYPE", "USER", "STATUS")
+			fmt.Println(strings.Repeat("-", 105))
 
 			for _, r := range results {
 				instance := r.Instance
@@ -561,12 +620,17 @@ and displays the results in a simple table format.`,
 					user = user[:15] + "..."
 				}
 
+				authType := r.AuthType
+				if authType == "" {
+					authType = "-"
+				}
+
 				statusStr := fmt.Sprintf("%d %s", r.StatusCode, r.Status)
 				if r.StatusCode == 0 {
 					statusStr = r.Status
 				}
 
-				fmt.Printf("%-20s %-35s %-20s %s\n", r.Profile, instance, user, statusStr)
+				fmt.Printf("%-20s %-35s %-10s %-20s %s\n", r.Profile, instance, authType, user, statusStr)
 			}
 
 			return nil
@@ -616,6 +680,23 @@ which verifies that your credentials (Basic Auth or g_ck token) are valid.`,
 	return cmd
 }
 
+// formatDuration formats a duration in seconds to a human-readable string
+func formatDuration(seconds int64) string {
+	if seconds < 0 {
+		return "expired"
+	}
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	if seconds < 3600 {
+		return fmt.Sprintf("%dm", seconds/60)
+	}
+	if seconds < 86400 {
+		return fmt.Sprintf("%dh", seconds/3600)
+	}
+	return fmt.Sprintf("%dd", seconds/86400)
+}
+
 func newAuthTokenCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
@@ -633,32 +714,62 @@ Note: The actual token is never shown, only its status.`,
 			profile := cfg.GetActiveProfile()
 			authManager := app.Auth.(*auth.Manager)
 
+			// Check OAuth environment variable first
+			if os.Getenv("SERVICENOW_OAUTH_TOKEN") != "" {
+				fmt.Println("Token: map[source:env type:oauth value:***]")
+				return nil
+			}
+
 			// Check environment variable first
 			if os.Getenv("SERVICENOW_TOKEN") != "" {
-				fmt.Println("Token: map[source:env value:***]")
+				fmt.Println("Token: map[source:env type:basic value:***]")
 				return nil
 			}
 
 			if profile == nil {
-				fmt.Println("Token: map[source:none value:]")
+				fmt.Println("Token: map[source:none type: value:]")
 				return nil
 			}
 
 			creds, err := authManager.GetCredentials()
-			if err != nil || creds == nil || creds.Token == "" {
-				fmt.Println("Token: map[source:none value:]")
+			if err != nil || creds == nil {
+				fmt.Println("Token: map[source:none type: value:]")
+				return nil
+			}
+
+			// Determine auth type and token
+			var tokenValue, authType string
+			if creds.IsOAuth() {
+				authType = "oauth"
+				tokenValue = creds.AccessToken
+			} else if profile.AuthMethod == "gck" {
+				authType = "gck"
+				tokenValue = creds.Token
+			} else {
+				authType = "basic"
+				tokenValue = creds.Token
+			}
+
+			if tokenValue == "" {
+				fmt.Println("Token: map[source:none type: value:]")
 				return nil
 			}
 
 			// Redact the token
-			tokenValue := creds.Token
 			if len(tokenValue) > 8 {
 				tokenValue = tokenValue[:4] + "..." + tokenValue[len(tokenValue)-4:]
 			} else {
 				tokenValue = "***"
 			}
 
-			fmt.Printf("Token: map[source:keyring value:%s]\n", tokenValue)
+			// Show OAuth-specific info
+			if creds.IsOAuth() && creds.ExpiresAt > 0 {
+				expiresIn := creds.ExpiresAt - time.Now().Unix()
+				expiresStr := formatDuration(expiresIn)
+				fmt.Printf("Token: map[source:keyring type:%s value:%s expires:%s]\n", authType, tokenValue, expiresStr)
+			} else {
+				fmt.Printf("Token: map[source:keyring type:%s value:%s]\n", authType, tokenValue)
+			}
 
 			return nil
 		},
