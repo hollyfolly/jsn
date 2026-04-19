@@ -18,8 +18,8 @@ func newTestClient(t *testing.T) *Client {
 	if instance == "" || user == "" || pass == "" {
 		t.Skip("SN_INSTANCE, SN_USER, SN_PASS required")
 	}
-	return NewClient(instance, func() (string, string, bool) {
-		return pass, user, false // basic auth: token=password, cookiesOrUsername=username
+	return NewClient(instance, func() (string, string, string) {
+		return pass, user, "basic" // basic auth: token=password, cookiesOrUsername=username
 	})
 }
 

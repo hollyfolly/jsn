@@ -29,7 +29,7 @@ func NewSetupCommand() *cobra.Command {
 
 This command will guide you through:
   1. Instance URL configuration
-  2. Authentication setup (Basic Auth or g_ck token)
+  2. Authentication setup (OAuth, Basic Auth, or g_ck token)
   3. Saving your configuration`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -208,33 +208,41 @@ func setupAuth(cmd *cobra.Command, app *appctx.App, instanceURL, profileName str
 	// Ask which auth method to use
 	fmt.Println("Choose authentication method:")
 	fmt.Println("  1) Basic Auth (username/password)")
-	fmt.Println("  2) g_ck Token (glide cookie)")
+	fmt.Println("  2) OAuth 2.0 (browser-based, most secure) [default]")
+	fmt.Println("  3) g_ck Token (glide cookie)")
 	fmt.Println()
 
 	var authMethod string
 	for {
-		fmt.Print("Method [1]: ")
+		fmt.Print("Method [2]: ")
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
-		if input == "" || input == "1" {
+		if input == "" || input == "2" {
+			authMethod = "oauth"
+			break
+		} else if input == "1" {
 			authMethod = "basic"
 			break
-		} else if input == "2" {
+		} else if input == "3" {
 			authMethod = "gck"
 			break
 		} else {
-			fmt.Println("Please enter 1 or 2.")
+			fmt.Println("Please enter 1, 2, or 3.")
 		}
 	}
 	fmt.Println()
 
 	cfg := app.Config.(*config.Config)
 
-	if authMethod == "basic" {
+	switch authMethod {
+	case "basic":
 		return setupBasicAuth(reader, cfg, authManager, instanceURL, profileName, configScope)
+	case "oauth":
+		return setupOAuthAuth(cfg, authManager, instanceURL, profileName, configScope)
+	default:
+		return setupGCKAuth(reader, cfg, authManager, instanceURL, profileName, configScope)
 	}
-	return setupGCKAuth(reader, cfg, authManager, instanceURL, profileName, configScope)
 }
 
 func setupBasicAuth(reader *bufio.Reader, cfg *config.Config, authManager *auth.Manager, instanceURL, profileName, configScope string) error {
@@ -319,6 +327,50 @@ func setupBasicAuth(reader *bufio.Reader, cfg *config.Config, authManager *auth.
 
 	fmt.Println()
 	fmt.Println("  ✓ Basic auth credentials saved.")
+	fmt.Println()
+
+	return nil
+}
+
+func setupOAuthAuth(cfg *config.Config, authManager *auth.Manager, instanceURL, profileName, configScope string) error {
+	fmt.Println("OAuth 2.0 Authentication")
+	fmt.Println()
+
+	// Run OAuth flow
+	creds, err := auth.OAuthFlow(instanceURL)
+	if err != nil {
+		return output.ErrAuth(fmt.Sprintf("OAuth authentication failed: %v", err))
+	}
+
+	// Save profile with auth method
+	profile := &config.Profile{
+		InstanceURL: instanceURL,
+		AuthMethod:  "oauth",
+	}
+
+	cfg.Profiles[profileName] = profile
+	if cfg.DefaultProfile == "" {
+		cfg.DefaultProfile = profileName
+	}
+
+	// Save to appropriate location
+	var saveErr error
+	if configScope == "local" {
+		saveErr = cfg.SaveLocal()
+	} else {
+		saveErr = cfg.Save()
+	}
+	if saveErr != nil {
+		return output.ErrAPI(500, fmt.Sprintf("failed to save config: %v", saveErr))
+	}
+
+	// Store credentials
+	if err := authManager.StoreCredentials(creds); err != nil {
+		return output.ErrAuth(fmt.Sprintf("failed to store credentials: %v", err))
+	}
+
+	fmt.Println()
+	fmt.Println("  ✓ OAuth credentials saved.")
 	fmt.Println()
 
 	return nil

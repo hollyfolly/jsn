@@ -13,7 +13,7 @@ curl -fsSL https://jsn.jace.pro/install | bash
 ## Quick Start
 
 ```bash
-jsn setup                           # Interactive first-time setup
+jsn setup                           # Interactive setup (OAuth by default)
 jsn tables list                     # List all tables
 jsn tables schema incident          # Show incident table schema
 jsn records --table incident                       # List incident records
@@ -172,24 +172,48 @@ Breadcrumbs suggest next commands, making it easy for humans and agents to navig
 
 ## Authentication
 
-Supports two authentication methods:
+Supports three authentication methods:
 
-**Basic Auth** (recommended for CI/CD):
+**OAuth 2.0** (recommended - most secure):
 ```bash
-jsn auth login                     # Enter username/password
+jsn auth login                     # Default - opens browser for OAuth
+jsn setup                          # OAuth is the default setup method
+```
+Uses PKCE (Proof Key for Code Exchange) for secure token exchange. Tokens refresh automatically.
+
+**Basic Auth** (good for CI/CD):
+```bash
+jsn auth login --method basic      # Enter username/password
 ```
 
-**g_ck Token** (browser cookie):
+**g_ck Token** (browser session):
 ```bash
-jsn auth login                     # Choose g_ck option
+jsn auth login --method gck        # Paste curl command from browser
 ```
 
 Credentials are stored securely using your system keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service). Falls back to file storage with restricted permissions if keyring is unavailable.
+
+### Contextual Header
+
+Every command shows your current working context:
+```
+# Use `jsn updateset use` or `jsn scope use` to change scope/updateset
+PROFILE USER   [SCOPE]  UPDATE SET
+pdi     System [global] Default
+```
+
+Each column is clickable in supporting terminals (iTerm2, Windows Terminal, GNOME Terminal 3.26+):
+- **PROFILE** → Instance URL
+- **USER** → Current user record
+- **[SCOPE]** → Application scope
+- **UPDATE SET** → Current update set
 
 ### Environment Variables
 
 | Variable | Purpose |
 |----------|---------|
+| `SERVICENOW_OAUTH_TOKEN` | OAuth access token (CI/CD) |
+| `SERVICENOW_OAUTH_REFRESH_TOKEN` | OAuth refresh token |
 | `SERVICENOW_TOKEN` | Override stored token/password |
 | `SERVICENOW_INSTANCE` | Override instance URL |
 | `XDG_CONFIG_HOME` | Custom config directory |

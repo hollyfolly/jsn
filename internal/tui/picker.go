@@ -31,6 +31,11 @@ type PageResult struct {
 // PageFetcher fetches a page of items. offset is the starting index, limit is page size.
 type PageFetcher func(ctx context.Context, offset, limit int) (*PageResult, error)
 
+// QueryablePageFetcher is a fetcher that supports dynamic queries (for search-as-you-type)
+// The query parameter is passed through and can modify the API call
+// Returns a new fetcher function bound to the query
+type QueryablePageFetcher func(ctx context.Context, offset, limit int, query string) (*PageResult, error)
+
 // PickerOption configures a picker
 type PickerOption func(*pickerModel)
 
@@ -75,6 +80,18 @@ func WithPageFetcher(fetcher PageFetcher, pageSize int) PickerOption {
 	}
 }
 
+// WithQueryablePageFetcher enables pagination with a fetcher that supports dynamic queries
+// This is used for search-as-you-type functionality where typing letters triggers new API queries
+func WithQueryablePageFetcher(fetcher QueryablePageFetcher, pageSize int) PickerOption {
+	return func(m *pickerModel) {
+		m.queryableFetcher = fetcher
+		m.pageSize = pageSize
+		if m.pageSize <= 0 {
+			m.pageSize = 50
+		}
+	}
+}
+
 // pickerModel is the bubbletea model
 type pickerModel struct {
 	items            []PickerItem
@@ -90,13 +107,20 @@ type pickerModel struct {
 	styles           pickerStyles
 
 	// Pagination
-	fetcher     PageFetcher
-	pageSize    int
-	offset      int
-	hasMore     bool
-	loadingMore bool
-	totalCount  int
-	ctx         context.Context
+	fetcher          PageFetcher
+	queryableFetcher QueryablePageFetcher // For dynamic query support
+	pageSize         int
+	offset           int
+	hasMore          bool
+	loadingMore      bool
+	totalCount       int
+	ctx              context.Context
+
+	// Search/filter state
+	searchMode  bool   // true when in search mode (after pressing /)
+	searchQuery string // current search query
+	jumpMode    bool   // true when in jump-to-letter mode
+	jumpBuffer  string // buffer for jump letters
 }
 
 type pickerStyles struct {
@@ -115,6 +139,7 @@ type itemsLoadedMsg struct {
 	hasMore bool
 	total   int
 	err     error
+	isReset bool // true when this replaces all items (query change), false when appending
 }
 
 func newPickerModel(items []PickerItem, opts ...PickerOption) pickerModel {
@@ -154,10 +179,23 @@ func (m pickerModel) Init() tea.Cmd {
 	if m.fetcher != nil && len(m.items) == 0 {
 		return m.loadMoreItems()
 	}
+	// If we have a queryable fetcher but no items, load first page with empty query
+	if m.queryableFetcher != nil && len(m.items) == 0 {
+		return m.loadWithQuery("", 0)
+	}
 	return nil
 }
 
-func (m pickerModel) loadMoreItems() tea.Cmd {
+func (m *pickerModel) loadMoreItems() tea.Cmd {
+	// Use queryable fetcher if available and we have an active query
+	if m.queryableFetcher != nil && (m.jumpBuffer != "" || m.searchQuery != "") {
+		query := m.jumpBuffer
+		if m.searchQuery != "" {
+			query = m.searchQuery
+		}
+		return m.loadWithQuery(query, 0)
+	}
+
 	if m.fetcher == nil || m.loadingMore || !m.hasMore && len(m.items) > 0 {
 		return nil
 	}
@@ -178,6 +216,28 @@ func (m pickerModel) loadMoreItems() tea.Cmd {
 	}
 }
 
+// loadWithQuery reloads items from page 0 with a new query
+func (m *pickerModel) loadWithQuery(query string, offset int) tea.Cmd {
+	if m.queryableFetcher == nil || m.loadingMore {
+		return nil
+	}
+
+	m.loadingMore = true
+
+	return func() tea.Msg {
+		result, err := m.queryableFetcher(m.ctx, offset, m.pageSize, query)
+		if err != nil {
+			return itemsLoadedMsg{err: err}
+		}
+		return itemsLoadedMsg{
+			items:   result.Items,
+			hasMore: result.HasMore,
+			total:   result.TotalCount,
+			isReset: true, // Signal that this is a reset, not an append
+		}
+	}
+}
+
 func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case itemsLoadedMsg:
@@ -187,10 +247,22 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Append new items
-		m.items = append(m.items, msg.items...)
-		m.filtered = m.items // Reset filter
-		m.offset = len(m.items)
+		if msg.isReset {
+			// Replace all items (query changed)
+			m.items = msg.items
+			m.filtered = msg.items
+			m.offset = len(msg.items)
+			m.cursor = 0
+			m.scrollOffset = 0
+		} else {
+			// Append new items (pagination)
+			m.items = append(m.items, msg.items...)
+			// Only reset filtered if not in search/jump mode
+			if !m.searchMode && !m.jumpMode {
+				m.filtered = m.items
+			}
+			m.offset = len(m.items)
+		}
 		m.hasMore = msg.hasMore
 		if msg.total > 0 {
 			m.totalCount = msg.total
@@ -198,16 +270,119 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle search mode first
+		if m.searchMode {
+			switch msg.String() {
+			case "esc", "ctrl+c":
+				m.searchMode = false
+				m.searchQuery = ""
+				m.filtered = m.items
+				m.cursor = 0
+				m.scrollOffset = 0
+				return m, nil
+			case "enter":
+				m.searchMode = false
+				if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+					m.selected = &m.filtered[m.cursor]
+					return m, tea.Quit
+				}
+				return m, nil
+			case "backspace":
+				if len(m.searchQuery) > 0 {
+					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+					m.applySearchFilter()
+				}
+				return m, nil
+			default:
+				// Add character to search query
+				if len(msg.String()) == 1 {
+					m.searchQuery += msg.String()
+					m.applySearchFilter()
+				}
+				return m, nil
+			}
+		}
+
+		// Handle jump mode
+		if m.jumpMode {
+			switch msg.String() {
+			case "esc", "ctrl+c":
+				m.jumpMode = false
+				m.jumpBuffer = ""
+				// If we have a queryable fetcher, reload without query to reset
+				if m.queryableFetcher != nil {
+					return m, m.loadWithQuery("", 0)
+				}
+				return m, nil
+			case "enter":
+				// Select the currently highlighted item
+				if len(m.filtered) > 0 && m.cursor < len(m.filtered) {
+					m.selected = &m.filtered[m.cursor]
+					return m, tea.Quit
+				}
+				// If nothing to select, just clear jump mode
+				m.jumpMode = false
+				m.jumpBuffer = ""
+				if m.queryableFetcher != nil {
+					return m, m.loadWithQuery("", 0)
+				}
+				return m, nil
+			case "backspace":
+				if len(m.jumpBuffer) > 0 {
+					m.jumpBuffer = m.jumpBuffer[:len(m.jumpBuffer)-1]
+					if m.jumpBuffer == "" {
+						// Exit jump mode if buffer is empty
+						m.jumpMode = false
+						// Reload without query
+						if m.queryableFetcher != nil {
+							return m, m.loadWithQuery("", 0)
+						}
+					} else {
+						// Reload with updated query
+						if m.queryableFetcher != nil {
+							return m, m.loadWithQuery(m.jumpBuffer, 0)
+						}
+						m.jumpToLetter()
+					}
+				}
+				return m, nil
+			default:
+				// Allow letters, numbers, underscore, and dot in jump mode
+				if len(msg.String()) == 1 && isValidJumpChar(msg.String()[0]) {
+					m.jumpBuffer += msg.String()
+					// If we have a queryable fetcher, reload with the query
+					if m.queryableFetcher != nil {
+						return m, m.loadWithQuery(m.jumpBuffer, 0)
+					}
+					// Otherwise fall back to local filtering
+					m.jumpToLetter()
+					return m, nil
+				}
+			}
+		}
+
+		// Normal mode
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
+		case "ctrl+c", "q":
 			m.quitting = true
 			return m, tea.Quit
-		case "up", "k":
+		case "esc":
+			if m.searchQuery != "" || len(m.filtered) < len(m.items) {
+				// Clear filter first
+				m.searchQuery = ""
+				m.filtered = m.items
+				m.cursor = 0
+				m.scrollOffset = 0
+				return m, nil
+			}
+			m.quitting = true
+			return m, tea.Quit
+		case "up":
 			if m.cursor > 0 {
 				m.cursor--
 				m.adjustScroll()
 			}
-		case "down", "j":
+		case "down":
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 				m.adjustScroll()
@@ -226,12 +401,22 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case "/":
-			// Filter mode - clear current filter on next key
+			// Enter search mode
+			m.searchMode = true
+			m.searchQuery = ""
 			return m, nil
 		default:
-			// Filter items based on typed text
-			if len(msg.String()) == 1 {
-				m.filterItems(msg.String())
+			// Single valid character enters jump mode
+			if len(msg.String()) == 1 && isValidJumpChar(msg.String()[0]) {
+				m.jumpMode = true
+				m.jumpBuffer = msg.String()
+				// If we have a queryable fetcher, reload with the query
+				if m.queryableFetcher != nil {
+					return m, m.loadWithQuery(m.jumpBuffer, 0)
+				}
+				// Otherwise fall back to local filtering
+				m.jumpToLetter()
+				return m, nil
 			}
 		}
 	}
@@ -251,13 +436,16 @@ func (m *pickerModel) adjustScroll() {
 	}
 }
 
-func (m *pickerModel) filterItems(query string) {
-	if query == "" {
+// applySearchFilter filters items based on the current search query
+func (m *pickerModel) applySearchFilter() {
+	if m.searchQuery == "" {
 		m.filtered = m.items
+		m.cursor = 0
+		m.scrollOffset = 0
 		return
 	}
 
-	queryLower := strings.ToLower(query)
+	queryLower := strings.ToLower(m.searchQuery)
 	var filtered []PickerItem
 	for _, item := range m.items {
 		if strings.Contains(strings.ToLower(item.Title), queryLower) ||
@@ -270,6 +458,32 @@ func (m *pickerModel) filterItems(query string) {
 	m.scrollOffset = 0
 }
 
+// jumpToLetter jumps to the first item starting with the jump buffer letters
+func (m *pickerModel) jumpToLetter() {
+	if m.jumpBuffer == "" {
+		return
+	}
+
+	bufferLower := strings.ToLower(m.jumpBuffer)
+	for i, item := range m.items {
+		if strings.HasPrefix(strings.ToLower(item.Title), bufferLower) {
+			m.cursor = i
+			m.adjustScroll()
+			return
+		}
+	}
+}
+
+// isValidJumpChar checks if a character is valid for jump mode
+// Allows: a-z, A-Z, 0-9, underscore, dot
+func isValidJumpChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') ||
+		(c >= 'A' && c <= 'Z') ||
+		(c >= '0' && c <= '9') ||
+		c == '_' ||
+		c == '.'
+}
+
 func (m pickerModel) View() string {
 	if m.quitting && m.selected == nil {
 		return ""
@@ -277,13 +491,25 @@ func (m pickerModel) View() string {
 
 	var b strings.Builder
 
-	// Title
-	b.WriteString(m.styles.Header.Render(m.title))
+	// Title with mode indicators
+	title := m.title
+	if m.searchMode {
+		title = fmt.Sprintf("%s [search: %s]", m.title, m.searchQuery)
+	} else if m.jumpMode {
+		title = fmt.Sprintf("%s [jump: %s]", m.title, m.jumpBuffer)
+	}
+	b.WriteString(m.styles.Header.Render(title))
 	b.WriteString("\n\n")
 
 	// Items
 	if len(m.filtered) == 0 && !m.loadingMore {
-		b.WriteString(m.styles.Muted.Render(m.emptyMessage))
+		if m.searchMode && m.searchQuery != "" {
+			b.WriteString(m.styles.Muted.Render(fmt.Sprintf("No items match '%s'", m.searchQuery)))
+		} else if m.jumpMode && m.jumpBuffer != "" {
+			b.WriteString(m.styles.Muted.Render(fmt.Sprintf("No items start with '%s'", m.jumpBuffer)))
+		} else {
+			b.WriteString(m.styles.Muted.Render(m.emptyMessage))
+		}
 	} else {
 		start := m.scrollOffset
 		end := start + m.maxVisible
@@ -342,10 +568,17 @@ func (m pickerModel) View() string {
 		}
 	}
 
-	// Help
-	helpText := "↑/↓/jk navigate • enter select • esc cancel"
-	if m.fetcher != nil && m.hasMore {
-		helpText += " • scroll to load more"
+	// Help - context sensitive
+	var helpText string
+	if m.searchMode {
+		helpText = "type to search • enter select • esc cancel search"
+	} else if m.jumpMode {
+		helpText = "type letters to jump • backspace removes • esc/enter clear"
+	} else {
+		helpText = "↑/↓ navigate • enter select • esc cancel • /search • a-z jump"
+		if m.fetcher != nil && m.hasMore {
+			helpText += " • scroll to load more"
+		}
 	}
 	b.WriteString("\n" + m.styles.Muted.Render(helpText))
 	b.WriteString("\n")
@@ -438,4 +671,53 @@ func SortWithCurrentFirst(items []PickerItem, isCurrent func(PickerItem) bool) {
 			}
 		}
 	}
+}
+
+// QueryablePicker is a picker that supports dynamic queries for search-as-you-type
+type QueryablePicker struct {
+	fetcher QueryablePageFetcher
+	opts    []PickerOption
+	ctx     context.Context
+}
+
+// NewQueryablePicker creates a picker with a queryable fetcher
+func NewQueryablePicker(fetcher QueryablePageFetcher, opts ...PickerOption) *QueryablePicker {
+	return &QueryablePicker{
+		fetcher: fetcher,
+		opts:    append([]PickerOption{WithQueryablePageFetcher(fetcher, 50)}, opts...),
+		ctx:     context.Background(),
+	}
+}
+
+// WithContext sets the context for the picker
+func (p *QueryablePicker) WithContext(ctx context.Context) *QueryablePicker {
+	p.ctx = ctx
+	return p
+}
+
+// Run shows the picker and returns the selected item
+func (p *QueryablePicker) Run() (*PickerItem, error) {
+	m := newPickerModel(nil, p.opts...)
+	m.ctx = p.ctx
+	m.queryableFetcher = p.fetcher
+
+	// Load initial items
+	program := tea.NewProgram(m)
+
+	finalModel, err := program.Run()
+	if err != nil {
+		return nil, err
+	}
+
+	final := finalModel.(pickerModel)
+	if final.quitting {
+		return nil, nil
+	}
+	return final.selected, nil
+}
+
+// PickWithQueryablePagination is a convenience function for paginated picking with query support
+// This enables search-as-you-type functionality where typing letters triggers new API queries
+func PickWithQueryablePagination(title string, fetcher QueryablePageFetcher, opts ...PickerOption) (*PickerItem, error) {
+	return NewQueryablePicker(fetcher, append([]PickerOption{WithPickerTitle(title)}, opts...)...).Run()
 }

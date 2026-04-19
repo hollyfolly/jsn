@@ -80,7 +80,24 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Mode 1: Direct lookup by sys_id
 			if len(args) > 0 {
-				return runRecordsShow(cmd, args[0])
+				arg := args[0]
+				// Check if it looks like a table name rather than a sys_id
+				if !looksLikeSysID(arg) && len(arg) < 32 && !strings.Contains(arg, "-") {
+					// Probably a table name, not a sys_id
+					return output.ErrUsage(fmt.Sprintf(`"%s" looks like a table name, not a sys_id.
+
+Did you mean:
+  jsn records --table %s           # List records from table
+  jsn records --table %s --search  # Search within table
+
+Available subcommands:
+  create    Create a new record
+  update    Update an existing record  
+  delete    Delete a record
+
+Use --table <name> to specify the table.`, arg, arg, arg))
+				}
+				return runRecordsShow(cmd, arg)
 			}
 
 			// Mode 2: Count-only mode
@@ -150,6 +167,7 @@ func runRecordsList(cmd *cobra.Command, flags recordsFlags) error {
 
 	sdkClient := appCtx.SDK.(*sdk.Client)
 
+	// Resolve table from --table flag or picker
 	table, err := getTableFromFlags(cmd, sdkClient, "Select a table to list records from:")
 	if err != nil {
 		return err
@@ -493,12 +511,15 @@ func runRecordsShow(cmd *cobra.Command, sysID string) error {
 		// If re-fetch fails, fall through with the original record
 	}
 
+	// Get version count for this record
+	versionCount, _ := sdkClient.CountVersions(cmd.Context(), table, sysID)
+
 	// Determine output format
 	format := outputWriter.GetFormat()
 	isTerminal := output.IsTTY(cmd.OutOrStdout())
 
 	if format == output.FormatStyled || (format == output.FormatAuto && isTerminal) {
-		if err := printStyledRecord(cmd, table, record, instanceURL); err != nil {
+		if err := printStyledRecord(cmd, table, record, instanceURL, versionCount); err != nil {
 			return err
 		}
 		// Enrichment: question_answer for ALL records
@@ -512,7 +533,7 @@ func runRecordsShow(cmd *cobra.Command, sysID string) error {
 	}
 
 	if format == output.FormatMarkdown {
-		return printMarkdownRecord(cmd, table, record, instanceURL)
+		return printMarkdownRecord(cmd, table, record, instanceURL, versionCount)
 	}
 
 	// Build breadcrumbs
@@ -533,6 +554,13 @@ func runRecordsShow(cmd *cobra.Command, sysID string) error {
 			Description: "Delete this record",
 		},
 	}
+	if versionCount > 0 {
+		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+			Action:      "versions",
+			Cmd:         fmt.Sprintf("jsn records --table sys_update_version --query \"name=%s_%s\"", table, sysID),
+			Description: fmt.Sprintf("View %d versions", versionCount),
+		})
+	}
 
 	return outputWriter.OK(record,
 		output.WithSummary(fmt.Sprintf("Record from %s", table)),
@@ -541,20 +569,24 @@ func runRecordsShow(cmd *cobra.Command, sysID string) error {
 }
 
 // printStyledRecord outputs styled record details.
-func printStyledRecord(cmd *cobra.Command, table string, record map[string]interface{}, instanceURL string) error {
+func printStyledRecord(cmd *cobra.Command, table string, record map[string]interface{}, instanceURL string, versionCount int) error {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(output.BrandColor)
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#666666"))
 	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	valueStyle := lipgloss.NewStyle()
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 
 	fmt.Fprintln(cmd.OutOrStdout())
 
-	// Title
+	// Title with version count
 	number := getStringField(record, "number")
 	if number == "" {
 		number = getStringField(record, "sys_id")
 	}
 	title := fmt.Sprintf("%s (%s)", number, table)
+	if versionCount > 0 {
+		title = fmt.Sprintf("%s (%s)  %s", number, table, mutedStyle.Render(fmt.Sprintf("[%d versions]", versionCount)))
+	}
 	fmt.Fprintln(cmd.OutOrStdout(), headerStyle.Render(title))
 	fmt.Fprintln(cmd.OutOrStdout())
 
@@ -672,19 +704,29 @@ func printStyledRecord(cmd *cobra.Command, table string, record map[string]inter
 		fmt.Sprintf("jsn records --table %s delete %s", table, sysID),
 		labelStyle.Render("Delete this record"),
 	)
+	if versionCount > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %-55s  %s\n",
+			fmt.Sprintf("jsn records --table sys_update_version --query \"name=%s_%s\"", table, sysID),
+			labelStyle.Render(fmt.Sprintf("View %d versions", versionCount)),
+		)
+	}
 
 	fmt.Fprintln(cmd.OutOrStdout())
 	return nil
 }
 
 // printMarkdownRecord outputs markdown record details.
-func printMarkdownRecord(cmd *cobra.Command, table string, record map[string]interface{}, instanceURL string) error {
+func printMarkdownRecord(cmd *cobra.Command, table string, record map[string]interface{}, instanceURL string, versionCount int) error {
 	number := getStringField(record, "number")
 	if number == "" {
 		number = getStringField(record, "sys_id")
 	}
 	sysID := getStringField(record, "sys_id")
-	fmt.Fprintf(cmd.OutOrStdout(), "**%s (%s)**\n\n", number, table)
+	if versionCount > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "**%s (%s)** — *%d versions*\n\n", number, table, versionCount)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "**%s (%s)**\n\n", number, table)
+	}
 
 	fmt.Fprintln(cmd.OutOrStdout(), "#### Fields")
 	fmt.Fprintln(cmd.OutOrStdout())
@@ -707,6 +749,9 @@ func printMarkdownRecord(cmd *cobra.Command, table string, record map[string]int
 	fmt.Fprintf(cmd.OutOrStdout(), "- `jsn records --table %s` — List all records\n", table)
 	fmt.Fprintf(cmd.OutOrStdout(), "- `jsn records --table %s update %s` — Update this record\n", table, sysID)
 	fmt.Fprintf(cmd.OutOrStdout(), "- `jsn records --table %s delete %s` — Delete this record\n", table, sysID)
+	if versionCount > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "- `jsn records --table sys_update_version --query \"name=%s_%s\"` — View %d versions\n", table, sysID, versionCount)
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "- `jsn records --table %s --query \"active=true\"` — Query with filter\n", table)
 	fmt.Fprintln(cmd.OutOrStdout(), "- Query operators: `= != < > LIKE STARTSWITH ENDSWITH ISEMPTY ISNOTEMPTY IN ^(AND) ^OR`")
 
@@ -1590,15 +1635,35 @@ func pickTable(ctx context.Context, sdkClient *sdk.Client, title string) (string
 
 // pickRecordPaginated shows a paginated interactive picker for records.
 // Fetches pages on demand so the user can scroll through all records.
+// Supports search-as-you-type via queryable fetcher.
 func pickRecordPaginated(cmd *cobra.Command, sdkClient *sdk.Client, table, displayColumn, query, orderBy string, orderDesc bool) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	// For interactive pickers, default to sorting by display column for jump-to-letter to work
+	pickerOrderBy := orderBy
+	if pickerOrderBy == "sys_updated_on" {
+		// User didn't specify a custom order, use display column for alphabetical sorting
+		pickerOrderBy = displayColumn
+	}
+
+	// Use queryable fetcher to support search-as-you-type
+	queryableFetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		// Build query with search if provided
+		finalQuery := query
+		if searchQuery != "" {
+			searchPart := fmt.Sprintf("%sSTARTSWITH%s", displayColumn, searchQuery)
+			if finalQuery != "" {
+				finalQuery = finalQuery + "^" + searchPart
+			} else {
+				finalQuery = searchPart
+			}
+		}
+
 		opts := &sdk.ListRecordsOptions{
 			Limit:     limit,
 			Offset:    offset,
-			Query:     query,
+			Query:     finalQuery,
 			Fields:    []string{"sys_id", "number", displayColumn},
-			OrderBy:   orderBy,
-			OrderDesc: orderDesc,
+			OrderBy:   pickerOrderBy,
+			OrderDesc: false, // Always ascending for alphabetical picker
 		}
 		records, err := sdkClient.ListRecords(ctx, table, opts)
 		if err != nil {
@@ -1637,9 +1702,9 @@ func pickRecordPaginated(cmd *cobra.Command, sdkClient *sdk.Client, table, displ
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(
+	selected, err := tui.PickWithQueryablePagination(
 		fmt.Sprintf("Select a record from %s:", table),
-		fetcher,
+		queryableFetcher,
 		tui.WithMaxVisible(15),
 	)
 	if err != nil {

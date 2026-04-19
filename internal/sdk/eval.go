@@ -57,14 +57,17 @@ func (c *Client) Eval(ctx context.Context, script string, opts EvalOptions) (*Ev
 		Jar:     jar,
 	}
 
-	_, cookies, isGCK := c.getAuth()
+	_, cookies, authType := c.getAuth()
 
 	// Step 1: Establish session
-	if isGCK && cookies != "" {
+	if authType == "gck" && cookies != "" {
 		// g_ck auth: seed the cookie jar with existing cookies
 		if err := c.seedCookieJar(jar); err != nil {
 			return nil, fmt.Errorf("seeding cookies: %w", err)
 		}
+	} else if authType == "oauth" {
+		// OAuth is not supported for script evaluation - requires session-based auth
+		return nil, fmt.Errorf("OAuth authentication is not supported for script evaluation. Please use Basic Auth or g_ck token")
 	} else {
 		// Basic auth (or g_ck without cookies): make a REST call to establish a session
 		if err := c.establishSession(ctx, sessionClient); err != nil {
@@ -133,8 +136,8 @@ func (c *Client) establishSession(ctx context.Context, sessionClient *http.Clien
 
 	// Always use basic auth for session establishment, regardless of configured auth method.
 	// For g_ck without cookies, the token/username fields hold basic auth credentials anyway.
-	token, cookiesOrUsername, isGCK := c.getAuth()
-	if isGCK {
+	token, cookiesOrUsername, authType := c.getAuth()
+	if authType == "gck" {
 		// g_ck mode but no cookies — the credentials are likely basic auth stored under gck config.
 		// token = password-like value, cookiesOrUsername = username
 		req.SetBasicAuth(cookiesOrUsername, token)

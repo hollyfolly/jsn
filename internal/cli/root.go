@@ -23,13 +23,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/jacebenson/jsn/internal/appctx"
 	"github.com/jacebenson/jsn/internal/auth"
 	"github.com/jacebenson/jsn/internal/commands"
 	"github.com/jacebenson/jsn/internal/config"
+	sncontext "github.com/jacebenson/jsn/internal/context"
 	"github.com/jacebenson/jsn/internal/output"
 	"github.com/jacebenson/jsn/internal/sdk"
 	"github.com/mattn/go-isatty"
@@ -97,6 +96,15 @@ Hierarchy: Use specific commands (rules, flows, etc.) first. Fall back to
 	root.AddCommand(commands.NewClientScriptsCmd())
 	root.AddCommand(commands.NewUIScriptsCmd())
 	root.AddCommand(commands.NewACLsCmd())
+
+	// ─── Automation ──────────────────────────────────────────────────────
+	root.AddCommand(commands.NewAssignmentRulesCmd())
+	root.AddCommand(commands.NewDecisionTablesCmd())
+	root.AddCommand(commands.NewEmailActionsCmd())
+	root.AddCommand(commands.NewScriptedRestCmd())
+	root.AddCommand(commands.NewImportSetsCmd())
+	root.AddCommand(commands.NewDataPoliciesCmd())
+	root.AddCommand(commands.NewCodeSearchCmd())
 
 	// ─── UI ──────────────────────────────────────────────────────────────
 	root.AddCommand(commands.NewUIPoliciesCmd())
@@ -183,20 +191,30 @@ func initializeApp(cmd *cobra.Command) error {
 	// Create SDK client
 	var sdkClient *sdk.Client
 	if activeProfile := cfg.GetActiveProfile(); activeProfile != nil {
-		sdkClient = sdk.NewClient(activeProfile.InstanceURL, func() (string, string, bool) {
+		sdkClient = sdk.NewClient(activeProfile.InstanceURL, func() (string, string, string) {
 			// Get credentials
 			creds, err := authManager.GetCredentials()
 			if err != nil {
-				return "", "", false
+				return "", "", "basic"
 			}
 
-			// For g_ck tokens: use X-UserToken header + cookies
-			// For basic auth: token=password, cookies=username (repurposed)
-			if activeProfile.AuthMethod == "gck" {
-				return creds.Token, creds.Cookies, true
+			// Determine auth method from credentials or profile
+			authMethod := activeProfile.AuthMethod
+			if creds.AuthMethod != "" {
+				authMethod = creds.AuthMethod
 			}
-			// Basic auth: token is password, pass username via cookies slot
-			return creds.Token, creds.Username, false
+
+			switch authMethod {
+			case "oauth":
+				// OAuth: use Bearer token
+				return creds.AccessToken, "", "oauth"
+			case "gck":
+				// g_ck tokens: use X-UserToken header + cookies
+				return creds.Token, creds.Cookies, "gck"
+			default:
+				// Basic auth: token is password, pass username via cookies slot
+				return creds.Token, creds.Username, "basic"
+			}
 		})
 	}
 
@@ -225,8 +243,8 @@ func initializeApp(cmd *cobra.Command) error {
 	return nil
 }
 
-// checkDefaultUpdateSet warns users if they're working in the default update set.
-// This helps prevent accidental changes to the default update set.
+// checkDefaultUpdateSet prints the contextual header for all commands.
+// This replaces the old default update set warning with a more informative header.
 func checkDefaultUpdateSet(ctx context.Context, sdkClient *sdk.Client, cfg *config.Config, flagSuppressed bool) {
 	// Check if suppressed via flag
 	if flagSuppressed {
@@ -240,50 +258,6 @@ func checkDefaultUpdateSet(ctx context.Context, sdkClient *sdk.Client, cfg *conf
 		}
 	}
 
-	currentUser, err := sdkClient.GetCurrentUser(ctx)
-	if err != nil {
-		return // Silently skip if we can't get the user
-	}
-
-	currentUpdateSet, err := sdkClient.GetCurrentUpdateSet(ctx, currentUser.SysID)
-	if err != nil || currentUpdateSet == nil {
-		return // Silently skip if we can't get the update set
-	}
-
-	// Check if update set name contains "default" (case-insensitive)
-	if strings.Contains(strings.ToLower(currentUpdateSet.Name), "default") {
-		warningStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#ffaa217"))
-		hintStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888"))
-		nameStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#e8a217"))
-		cmdStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00afff"))
-
-		scope := currentUpdateSet.AppName
-		if scope == "" {
-			scope = currentUpdateSet.Application
-		}
-		if scope == "" {
-			scope = "global"
-		}
-
-		fmt.Fprintln(os.Stderr, warningStyle.Render("⚠ Update set name contains 'default'"))
-		fmt.Fprintln(os.Stderr, hintStyle.Render("  Current: ")+nameStyle.Render(currentUpdateSet.Name))
-		fmt.Fprintln(os.Stderr, hintStyle.Render("  Scope:   ")+scope)
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, hintStyle.Render("  This warning shows for any update set with 'default' in the name."))
-		fmt.Fprintln(os.Stderr, hintStyle.Render("  Hiding it will suppress ALL such warnings."))
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, hintStyle.Render("  To use a different update set:"))
-		fmt.Fprintln(os.Stderr, cmdStyle.Render("    jsn updateset use"))
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, hintStyle.Render("  To hide this warning (all 'default' update sets):"))
-		fmt.Fprintln(os.Stderr, cmdStyle.Render("    jsn updateset hide-warning    # Permanent"))
-		fmt.Fprintln(os.Stderr, cmdStyle.Render("    --no-updateset-warning        # This session only"))
-		fmt.Fprintln(os.Stderr)
-	}
+	// Print contextual header using the shared package
+	_ = sncontext.PrintHeader(os.Stderr, cfg, sdkClient)
 }

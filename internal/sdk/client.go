@@ -16,14 +16,19 @@ import (
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
-	// getAuth returns (token, cookiesOrUsername, isGCK)
-	// For g_ck: token = X-UserToken, cookiesOrUsername = Cookie header value
-	// For basic: token = password, cookiesOrUsername = username
-	getAuth func() (token, cookiesOrUsername string, isGCK bool)
+	// getAuth returns (token, cookiesOrUsername, authType)
+	// For g_ck: token = X-UserToken, cookiesOrUsername = Cookie header value, authType = "gck"
+	// For basic: token = password, cookiesOrUsername = username, authType = "basic"
+	// For oauth: token = access_token, cookiesOrUsername = "", authType = "oauth"
+	getAuth func() (token, cookiesOrUsername, authType string)
 }
 
 // NewClient creates a new ServiceNow API client.
-func NewClient(baseURL string, getAuth func() (token, cookiesOrUsername string, isGCK bool)) *Client {
+// The getAuth function returns (token, cookiesOrUsername, authType) where authType is one of:
+//   - "basic": uses HTTP Basic Auth with username/password
+//   - "gck": uses X-UserToken header with Cookie
+//   - "oauth": uses Bearer token Authorization header
+func NewClient(baseURL string, getAuth func() (token, cookiesOrUsername, authType string)) *Client {
 	return &Client{
 		baseURL: strings.TrimSuffix(baseURL, "/"),
 		httpClient: &http.Client{
@@ -35,13 +40,16 @@ func NewClient(baseURL string, getAuth func() (token, cookiesOrUsername string, 
 
 // setAuth applies authentication headers to a request.
 func (c *Client) setAuth(req *http.Request) {
-	token, cookiesOrUsername, isGCK := c.getAuth()
-	if isGCK {
+	token, cookiesOrUsername, authType := c.getAuth()
+	switch authType {
+	case "gck":
 		req.Header.Set("X-UserToken", token)
 		if cookiesOrUsername != "" {
 			req.Header.Set("Cookie", cookiesOrUsername)
 		}
-	} else {
+	case "oauth":
+		req.Header.Set("Authorization", "Bearer "+token)
+	default: // "basic" or empty
 		req.SetBasicAuth(cookiesOrUsername, token)
 	}
 }
