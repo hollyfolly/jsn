@@ -54,3 +54,8 @@ build/
 
 # bruno tests
 .bruno/
+
+# Ignore local/backup directories starting with "."
+/.old-*/
+/.backup*/
+/.local*/
