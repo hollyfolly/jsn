@@ -1587,11 +1587,16 @@ func resolveFieldValue(value string) (string, error) {
 
 // pickTable shows an interactive table picker and returns the selected table name.
 func pickTable(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListTablesOptions{
 			Limit:   limit,
 			Offset:  offset,
 			OrderBy: "name",
+			Query:   q,
 		}
 		tables, err := sdkClient.ListTables(ctx, opts)
 		if err != nil {
@@ -1622,7 +1627,7 @@ func pickTable(ctx context.Context, sdkClient *sdk.Client, title string) (string
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

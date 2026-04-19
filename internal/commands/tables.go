@@ -149,11 +149,20 @@ func runTablesList(cmd *cobra.Command, flags tablesListFlags) error {
 		sysparmQuery := strings.Join(queryParts, "^")
 
 		// Create paginated fetcher
-		fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+		fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+			finalQuery := sysparmQuery
+			if searchQuery != "" {
+				searchPart := "nameLIKE" + searchQuery
+				if finalQuery != "" {
+					finalQuery = finalQuery + "^" + searchPart
+				} else {
+					finalQuery = searchPart
+				}
+			}
 			opts := &sdk.ListTablesOptions{
 				Limit:       limit,
 				Offset:      offset,
-				Query:       sysparmQuery,
+				Query:       finalQuery,
 				OrderBy:     flags.order,
 				OrderDesc:   flags.desc,
 				ShowExtends: flags.showExtends,
@@ -188,7 +197,7 @@ func runTablesList(cmd *cobra.Command, flags tablesListFlags) error {
 		}
 
 		// Show picker with pagination
-		selected, err := tui.PickWithPagination("Select a table:", fetcher,
+		selected, err := tui.PickWithQueryablePagination("Select a table:", fetcher,
 			tui.WithMaxVisible(15),
 		)
 		if err != nil {
@@ -330,11 +339,16 @@ func runTablesShow(cmd *cobra.Command, name string) error {
 		}
 
 		// Create paginated fetcher for tables
-		fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+		fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+			q := ""
+			if searchQuery != "" {
+				q = "nameLIKE" + searchQuery
+			}
 			opts := &sdk.ListTablesOptions{
 				Limit:   limit,
 				Offset:  offset,
 				OrderBy: "name",
+				Query:   q,
 			}
 			tables, err := sdkClient.ListTables(ctx, opts)
 			if err != nil {
@@ -366,7 +380,7 @@ func runTablesShow(cmd *cobra.Command, name string) error {
 		}
 
 		// Show picker with pagination
-		selected, err := tui.PickWithPagination("Select a table:", fetcher,
+		selected, err := tui.PickWithQueryablePagination("Select a table:", fetcher,
 			tui.WithMaxVisible(15),
 		)
 		if err != nil {
@@ -635,11 +649,16 @@ func runTablesSchema(cmd *cobra.Command, name string) error {
 		}
 
 		// Create paginated fetcher for tables
-		fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+		fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+			q := ""
+			if searchQuery != "" {
+				q = "nameLIKE" + searchQuery
+			}
 			opts := &sdk.ListTablesOptions{
 				Limit:   limit,
 				Offset:  offset,
 				OrderBy: "name",
+				Query:   q,
 			}
 			tables, err := sdkClient.ListTables(ctx, opts)
 			if err != nil {
@@ -671,7 +690,7 @@ func runTablesSchema(cmd *cobra.Command, name string) error {
 		}
 
 		// Show picker with pagination
-		selected, err := tui.PickWithPagination("Select a table:", fetcher,
+		selected, err := tui.PickWithQueryablePagination("Select a table:", fetcher,
 			tui.WithMaxVisible(15),
 		)
 		if err != nil {
@@ -1076,10 +1095,15 @@ func runTablesColumns(cmd *cobra.Command, name string, limit int) error {
 		}
 
 		// Create paginated fetcher for tables
-		fetcher := func(ctx context.Context, offset, pageLimit int) (*tui.PageResult, error) {
+		fetcher := func(ctx context.Context, offset, pageLimit int, searchQuery string) (*tui.PageResult, error) {
+			q := ""
+			if searchQuery != "" {
+				q = "nameLIKE" + searchQuery
+			}
 			opts := &sdk.ListTablesOptions{
 				Limit:   pageLimit,
 				Offset:  offset,
+				Query:   q,
 				OrderBy: "name",
 			}
 			tables, err := sdkClient.ListTables(ctx, opts)
@@ -1112,7 +1136,7 @@ func runTablesColumns(cmd *cobra.Command, name string, limit int) error {
 		}
 
 		// Show picker with pagination
-		selected, err := tui.PickWithPagination("Select a table:", fetcher,
+		selected, err := tui.PickWithQueryablePagination("Select a table:", fetcher,
 			tui.WithMaxVisible(15),
 		)
 		if err != nil {

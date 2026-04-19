@@ -557,10 +557,15 @@ func runRulesScript(cmd *cobra.Command, sysID string) error {
 
 // pickRule shows an interactive rule picker and returns the selected rule sys_id.
 func pickRule(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListRulesOptions{
 			Limit:   limit,
 			Offset:  offset,
+			Query:   q,
 			OrderBy: "name",
 		}
 		rules, err := sdkClient.ListRules(ctx, opts)
@@ -588,7 +593,7 @@ func pickRule(ctx context.Context, sdkClient *sdk.Client, title string) (string,
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

@@ -450,10 +450,15 @@ func printMarkdownFlowVariables(cmd *cobra.Command, flow *sdk.Flow, variables []
 
 // pickFlow shows an interactive flow picker and returns the selected flow name.
 func pickFlow(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListFlowsOptions{
 			Limit:   limit,
 			Offset:  offset,
+			Query:   q,
 			OrderBy: "name",
 		}
 		flows, err := sdkClient.ListFlows(ctx, opts)
@@ -481,7 +486,7 @@ func pickFlow(ctx context.Context, sdkClient *sdk.Client, title string) (string,
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}
@@ -530,11 +535,20 @@ func _pickFlowFromList(flows []sdk.Flow) (string, error) {
 // pickFlowPaginated shows a paginated interactive picker for flows.
 // Fetches pages on demand so the user can scroll through all flows.
 func pickFlowPaginated(ctx context.Context, sdkClient *sdk.Client, query, orderBy string, orderDesc bool) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		finalQuery := query
+		if searchQuery != "" {
+			searchPart := "nameLIKE" + searchQuery
+			if finalQuery != "" {
+				finalQuery = finalQuery + "^" + searchPart
+			} else {
+				finalQuery = searchPart
+			}
+		}
 		opts := &sdk.ListFlowsOptions{
 			Limit:     limit,
 			Offset:    offset,
-			Query:     query,
+			Query:     finalQuery,
 			OrderBy:   orderBy,
 			OrderDesc: orderDesc,
 		}
@@ -570,7 +584,7 @@ func pickFlowPaginated(ctx context.Context, sdkClient *sdk.Client, query, orderB
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination("Select a flow to view:", fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination("Select a flow to view:", fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

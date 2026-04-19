@@ -944,11 +944,16 @@ func runJobsScript(cmd *cobra.Command, sysID, jobType string) error {
 
 // pickJob shows an interactive job picker and returns the selected job sys_id.
 func pickJob(ctx context.Context, sdkClient *sdk.Client, title, table string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListJobsOptions{
 			Table:   table,
 			Limit:   limit,
 			Offset:  offset,
+			Query:   q,
 			OrderBy: "name",
 		}
 		jobs, err := sdkClient.ListJobs(ctx, opts)
@@ -976,7 +981,7 @@ func pickJob(ctx context.Context, sdkClient *sdk.Client, title, table string) (s
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

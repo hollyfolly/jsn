@@ -406,11 +406,16 @@ func printMarkdownPortal(cmd *cobra.Command, portal *sdk.Portal, instanceURL str
 
 // pickPortal shows an interactive portal picker and returns the selected portal ID.
 func pickPortal(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "titleLIKE" + searchQuery
+		}
 		opts := &sdk.ListPortalsOptions{
 			Limit:   limit,
 			Offset:  offset,
 			OrderBy: "name",
+			Query:   q,
 		}
 		portals, err := sdkClient.ListPortals(ctx, opts)
 		if err != nil {
@@ -437,7 +442,7 @@ func pickPortal(ctx context.Context, sdkClient *sdk.Client, title string) (strin
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

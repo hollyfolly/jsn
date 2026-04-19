@@ -538,10 +538,15 @@ func runClientScriptsScript(cmd *cobra.Command, sysID string) error {
 
 // pickClientScript shows an interactive client script picker and returns the selected script sys_id.
 func pickClientScript(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListClientScriptsOptions{
 			Limit:   limit,
 			Offset:  offset,
+			Query:   q,
 			OrderBy: "name",
 		}
 		scripts, err := sdkClient.ListClientScripts(ctx, opts)
@@ -569,7 +574,7 @@ func pickClientScript(ctx context.Context, sdkClient *sdk.Client, title string) 
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

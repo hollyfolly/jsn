@@ -219,10 +219,15 @@ func runScopeUse(cmd *cobra.Command, name string) error {
 	// Interactive selection if no name provided
 	if name == "" {
 		// Create paginated fetcher for applications
-		fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+		fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+			q := ""
+			if searchQuery != "" {
+				q = "nameLIKE" + searchQuery
+			}
 			opts := &sdk.ListApplicationsOptions{
 				Limit:  limit,
 				Offset: offset,
+				Query:  q,
 			}
 			apps, err := sdkClient.ListApplicationsWithOptions(ctx, opts)
 			if err != nil {
@@ -255,7 +260,7 @@ func runScopeUse(cmd *cobra.Command, name string) error {
 		}
 
 		// Show picker with pagination
-		selected, err := tui.PickWithPagination("Select application scope:", fetcher,
+		selected, err := tui.PickWithQueryablePagination("Select application scope:", fetcher,
 			tui.WithMaxVisible(15),
 		)
 		if err != nil {

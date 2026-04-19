@@ -862,10 +862,15 @@ func printMarkdownACLCheck(cmd *cobra.Command, table, operation string, acls []s
 
 // pickACL shows an interactive ACL picker and returns the selected ACL sys_id.
 func pickACL(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListACLOptions{
 			Limit:   limit,
 			Offset:  offset,
+			Query:   q,
 			OrderBy: "name",
 		}
 		acls, err := sdkClient.ListACLs(ctx, opts)
@@ -893,7 +898,7 @@ func pickACL(ctx context.Context, sdkClient *sdk.Client, title string) (string, 
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

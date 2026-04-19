@@ -260,11 +260,20 @@ func runEmailActionsShow(cmd *cobra.Command, name string) error {
 
 // pickEmailActionPaginated shows a paginated interactive picker for email actions.
 func pickEmailActionPaginated(ctx context.Context, sdkClient *sdk.Client, query, orderBy string, orderDesc bool) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		finalQuery := query
+		if searchQuery != "" {
+			searchPart := "nameLIKE" + searchQuery
+			if finalQuery != "" {
+				finalQuery = finalQuery + "^" + searchPart
+			} else {
+				finalQuery = searchPart
+			}
+		}
 		opts := &sdk.ListRecordsOptions{
 			Limit:     limit,
 			Offset:    offset,
-			Query:     query,
+			Query:     finalQuery,
 			OrderBy:   orderBy,
 			OrderDesc: orderDesc,
 			Fields:    []string{"sys_id", "name", "active", "table", "subject"},
@@ -303,7 +312,7 @@ func pickEmailActionPaginated(ctx context.Context, sdkClient *sdk.Client, query,
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination("Select an email action:", fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination("Select an email action:", fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

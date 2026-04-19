@@ -234,11 +234,20 @@ func runAssignmentRulesShow(cmd *cobra.Command, name string) error {
 
 // pickAssignmentRulePaginated shows a paginated interactive picker for assignment rules.
 func pickAssignmentRulePaginated(ctx context.Context, sdkClient *sdk.Client, query, orderBy string, orderDesc bool) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		finalQuery := query
+		if searchQuery != "" {
+			searchPart := "nameLIKE" + searchQuery
+			if finalQuery != "" {
+				finalQuery = finalQuery + "^" + searchPart
+			} else {
+				finalQuery = searchPart
+			}
+		}
 		opts := &sdk.ListRecordsOptions{
 			Limit:     limit,
 			Offset:    offset,
-			Query:     query,
+			Query:     finalQuery,
 			OrderBy:   orderBy,
 			OrderDesc: orderDesc,
 			Fields:    []string{"sys_id", "name", "table", "active", "user", "group"},
@@ -280,7 +289,7 @@ func pickAssignmentRulePaginated(ctx context.Context, sdkClient *sdk.Client, que
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination("Select an assignment rule:", fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination("Select an assignment rule:", fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

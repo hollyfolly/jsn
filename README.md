@@ -5,7 +5,7 @@
 A CLI for exploring and managing ServiceNow instances. Works standalone or with any AI agent (Claude, Codex, Cursor, etc.).
 
 ```bash
-# Install in seconds
+# Install (or update) in seconds
 curl -fsSL https://jsn.jace.pro/install | bash
 ```
 [View install script source →](scripts/install.sh)
@@ -16,8 +16,8 @@ curl -fsSL https://jsn.jace.pro/install | bash
 jsn setup                           # Interactive setup (OAuth by default)
 jsn tables list                     # List all tables
 jsn tables schema incident          # Show incident table schema
-jsn records --table incident                       # List incident records
-jsn rules --search incident                        # Show business rules
+jsn records --table incident        # List incident records
+jsn rules --table incident          # Show business rules
 ```
 
 ---
@@ -116,32 +116,41 @@ go build -o jsn ./cmd/jsn/main.go
 ```bash
 # Explore your instance
 jsn tables list                                    # List all tables
-jsn tables schema incident                         # Show table inheritance
+jsn tables schema incident                         # Show table structure
 jsn tables columns incident                        # Show all columns
 
 # Query records
-jsn records --table incident                          # List records
-jsn records --table incident --query "priority=1"     # Filter with encoded query
-jsn records --table incident <sys_id>                 # Show specific record
+jsn records --table incident                       # List records
+jsn records --table incident --query "priority=1"  # Filter with encoded query
+jsn records --table incident <sys_id>              # Show specific record
 
 # Manage data
 jsn records --table incident create -f short_description="Server down"
 jsn records --table incident update <sys_id> -f priority=1
-jsn records --table incident delete <sys_id> --force
+jsn records --table incident delete <sys_id>
 
 # Business logic
-jsn rules --search incident                        # List business rules
-jsn flows --active                                 # List flows
-jsn script-includes                                # List script includes
+jsn rules --table incident                         # List business rules
+jsn rules --search approval                        # Search rules by name
+jsn flows --active                                 # List active flows
+jsn script-includes --search Utils                 # Search script includes
 
 # Update sets
 jsn updateset list                                 # List update sets
 jsn updateset use <name>                           # Set current update set
 
 # Configuration
-jsn config list                                    # List profiles
-jsn config switch <name>                           # Switch profile
+jsn config profile                                 # Show current profile
+jsn config profile <name>                          # Switch profile
 jsn auth status                                    # Check auth status
+```
+
+## Updating
+
+Re-run the install script to update to the latest version:
+
+```bash
+curl -fsSL https://jsn.jace.pro/install | bash
 ```
 
 ## Output Formats

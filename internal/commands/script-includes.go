@@ -545,10 +545,15 @@ func runScriptIncludesScript(cmd *cobra.Command, identifier string) error {
 
 // pickScriptInclude shows an interactive script include picker and returns the selected name.
 func pickScriptInclude(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListScriptIncludesOptions{
 			Limit:   limit,
 			Offset:  offset,
+			Query:   q,
 			OrderBy: "name",
 		}
 		scripts, err := sdkClient.ListScriptIncludes(ctx, opts)
@@ -579,7 +584,7 @@ func pickScriptInclude(ctx context.Context, sdkClient *sdk.Client, title string)
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

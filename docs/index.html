@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JSN - ServiceNow CLI</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.15.1/dist/bundle/asciinema-player.css">
+    
     <style>
         * {
             margin: 0;
@@ -104,13 +104,22 @@
             color: var(--accent);
         }
 
-        /* Asciinema */
+        /* Demo */
         .demo {
             margin: 3rem 0;
             border-radius: 8px;
             overflow: hidden;
             border: 1px solid var(--border);
+            background: #1e1e1e;
+            padding: 1.5rem;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.85rem;
+            line-height: 1.8;
         }
+
+        .demo .prompt { color: var(--accent); }
+        .demo .output { color: var(--muted); }
+        .demo .heading { color: #fff; font-weight: bold; margin-top: 1rem; }
 
         /* Features */
         .features {
@@ -210,6 +219,8 @@
             </div>
             <p style="text-align: center; font-size: 0.85rem; margin-top: -1rem;">
                 <a href="https://github.com/jacebenson/jsn/blob/main/scripts/install.sh" style="color: var(--muted); text-decoration: none;">View install script source →</a>
+                &nbsp;·&nbsp;
+                <span style="color: var(--muted);">Re-run to update</span>
             </p>
 
             <div style="background: rgba(255, 193, 7, 0.05); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-top: 1.5rem; font-size: 0.85rem; text-align: left;">
@@ -222,7 +233,19 @@
             </div>
         </header>
 
-        <div class="demo" id="demo"></div>
+        <div class="demo" id="demo">
+            <div class="heading">$ jsn setup</div>
+            <div class="output">→ JSN Setup<br><br>Instance URL: https://dev12345.service-now.com<br>Profile: dev<br>Authentication: OAuth 2.0 (browser)<br>✓ Authenticated as admin</div>
+
+            <div class="heading">$ jsn records --table change_request</div>
+            <div class="output">Select a record from change_request:<br><br>&gt; CHG0000077 - A failed RAID controller card needs to be replaced<br>&nbsp; CHG0000067 - A failed RAID controller card needs to be replaced<br>&nbsp; CHG0040005 - Add network switch to cabinet<br>&nbsp; CHG0000011 - Another Java Application Server change<br>&nbsp; CHG0000009 - Apply patches 10.2.0.1 to 10.2.0.3<br><br><span style="color:#555;">↑/↓ navigate • enter select • /search • a-z jump</span></div>
+
+            <div class="heading">$ jsn rules --table incident</div>
+            <div class="output">Select a rule to view:<br><br>&gt; Abort changes on group - incident - before<br>&nbsp; Add info messages for incident closure - incident - after<br>&nbsp; Auto assessment business rule - incident - async<br>&nbsp; Caller Close - incident - before<br>&nbsp; Cascade closure of Incident Tasks - incident - after<br><br><span style="color:#555;">1-5 of 20 loaded (20 total)</span></div>
+
+            <div class="heading">$ jsn flows</div>
+            <div class="output">Flow: Change - Cloud Infrastructure - Authorize<br><br>&nbsp; Status: Active | Version: Unset (Assumed V1)<br><br>▶ TRIGGER<br>──────────────────────────────────────<br>&nbsp; Created or Updated<br><br>⚡ FLOW STRUCTURE<br>──────────────────────────────────────<br>1. Apply Change Approval Policy<br>2. Wait For Condition<br>3. Do the following in Parallel<br>4. &nbsp; If → Update Record<br>5. &nbsp; Else → Update Record<br>6. Evaluate Change Model</div>
+        </div>
 
         <section class="features">
             <div class="feature">
@@ -249,7 +272,7 @@
                 <div class="code-block">
                     <span class="cmd">jsn tables schema incident</span> <span class="comment"># Table structure</span><br>
                     <span class="cmd">jsn rules --table incident</span> <span class="comment"># Business rules</span><br>
-                    <span class="cmd">jsn flows</span> <span class="comment"># Active flows</span>
+                    <span class="cmd">jsn flows --active</span> <span class="comment"># Active flows</span>
                 </div>
             </div>
 
@@ -313,29 +336,7 @@
         </footer>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.15.1/dist/bundle/asciinema-player.min.js"></script>
     <script>
-        // Initialize asciinema player when DOM is ready
-        document.addEventListener('DOMContentLoaded', function() {
-            const demoContainer = document.getElementById('demo');
-            if (demoContainer && typeof AsciinemaPlayer !== 'undefined') {
-                try {
-                    AsciinemaPlayer.create('asciinema.cast', demoContainer, {
-                        cols: 150,
-                        rows: 38,
-                        autoPlay: true,
-                        loop: true,
-                        theme: 'monokai',
-                        fit: 'width',
-                        preload: true
-                    });
-                } catch (e) {
-                    console.error('Asciinema player failed to load:', e);
-                    demoContainer.innerHTML = '<p style="text-align:center;padding:2rem;color:#8a8a8d;">Demo loading failed. <a href="asciinema.cast" style="color:#ffc107;">Download recording</a></p>';
-                }
-            }
-        });
-
         // Copy install command
         function copyInstall() {
             const code = 'curl -fsSL https://jsn.jace.pro/install | bash';

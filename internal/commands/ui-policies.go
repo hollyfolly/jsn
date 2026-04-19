@@ -606,10 +606,15 @@ func runUIPoliciesScript(cmd *cobra.Command, sysID string) error {
 
 // pickUIPolicy shows an interactive UI policy picker and returns the selected policy sys_id.
 func pickUIPolicy(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListUIPoliciesOptions{
 			Limit:   limit,
 			Offset:  offset,
+			Query:   q,
 			OrderBy: "name",
 		}
 		policies, err := sdkClient.ListUIPolicies(ctx, opts)
@@ -637,7 +642,7 @@ func pickUIPolicy(ctx context.Context, sdkClient *sdk.Client, title string) (str
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

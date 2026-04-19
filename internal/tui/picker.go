@@ -257,10 +257,18 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			// Append new items (pagination)
 			m.items = append(m.items, msg.items...)
-			// Only reset filtered if not in search/jump mode
-			if !m.searchMode && !m.jumpMode {
+			// Re-apply active filter to include new items, preserving cursor
+			savedCursor := m.cursor
+			savedScroll := m.scrollOffset
+			if m.searchMode && m.searchQuery != "" {
+				m.applySearchFilter()
+			} else if m.jumpMode && m.jumpBuffer != "" {
+				m.jumpToLetter()
+			} else {
 				m.filtered = m.items
 			}
+			m.cursor = savedCursor
+			m.scrollOffset = savedScroll
 			m.offset = len(m.items)
 		}
 		m.hasMore = msg.hasMore
@@ -313,6 +321,9 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.queryableFetcher != nil {
 					return m, m.loadWithQuery("", 0)
 				}
+				m.filtered = m.items
+				m.cursor = 0
+				m.scrollOffset = 0
 				return m, nil
 			case "enter":
 				// Select the currently highlighted item
@@ -326,6 +337,9 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.queryableFetcher != nil {
 					return m, m.loadWithQuery("", 0)
 				}
+				m.filtered = m.items
+				m.cursor = 0
+				m.scrollOffset = 0
 				return m, nil
 			case "backspace":
 				if len(m.jumpBuffer) > 0 {
@@ -337,6 +351,9 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.queryableFetcher != nil {
 							return m, m.loadWithQuery("", 0)
 						}
+						m.filtered = m.items
+						m.cursor = 0
+						m.scrollOffset = 0
 					} else {
 						// Reload with updated query
 						if m.queryableFetcher != nil {
@@ -363,7 +380,7 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Normal mode
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
 		case "esc":
@@ -458,20 +475,28 @@ func (m *pickerModel) applySearchFilter() {
 	m.scrollOffset = 0
 }
 
-// jumpToLetter jumps to the first item starting with the jump buffer letters
+// jumpToLetter filters and jumps to items matching the jump buffer
 func (m *pickerModel) jumpToLetter() {
 	if m.jumpBuffer == "" {
+		m.filtered = m.items
+		m.cursor = 0
+		m.scrollOffset = 0
 		return
 	}
 
 	bufferLower := strings.ToLower(m.jumpBuffer)
-	for i, item := range m.items {
-		if strings.HasPrefix(strings.ToLower(item.Title), bufferLower) {
-			m.cursor = i
-			m.adjustScroll()
-			return
+
+	// Filter items to only those containing the jump buffer
+	var filtered []PickerItem
+	for _, item := range m.items {
+		if strings.Contains(strings.ToLower(item.Title), bufferLower) ||
+			strings.Contains(strings.ToLower(item.Description), bufferLower) {
+			filtered = append(filtered, item)
 		}
 	}
+	m.filtered = filtered
+	m.cursor = 0
+	m.scrollOffset = 0
 }
 
 // isValidJumpChar checks if a character is valid for jump mode
@@ -482,6 +507,20 @@ func isValidJumpChar(c byte) bool {
 		(c >= '0' && c <= '9') ||
 		c == '_' ||
 		c == '.'
+}
+
+// MergeQuery combines a base encoded query with a search term.
+// If searchQuery is empty, returns baseQuery unchanged.
+// searchField is the ServiceNow operator prefix, e.g. "nameLIKE" or "titleLIKE".
+func MergeQuery(baseQuery, searchQuery, searchField string) string {
+	if searchQuery == "" {
+		return baseQuery
+	}
+	searchPart := searchField + searchQuery
+	if baseQuery != "" {
+		return baseQuery + "^" + searchPart
+	}
+	return searchPart
 }
 
 func (m pickerModel) View() string {

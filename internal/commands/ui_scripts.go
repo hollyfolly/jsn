@@ -461,11 +461,16 @@ func printMarkdownUIScriptCode(cmd *cobra.Command, script *sdk.UIScript) error {
 
 // pickUIScript shows an interactive UI script picker and returns the selected name.
 func pickUIScript(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "nameLIKE" + searchQuery
+		}
 		opts := &sdk.ListUIScriptsOptions{
 			Limit:   limit,
 			Offset:  offset,
 			OrderBy: "name",
+			Query:   q,
 		}
 		scripts, err := sdkClient.ListUIScripts(ctx, opts)
 		if err != nil {
@@ -492,7 +497,7 @@ func pickUIScript(ctx context.Context, sdkClient *sdk.Client, title string) (str
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

@@ -496,11 +496,16 @@ func printMarkdownPage(cmd *cobra.Command, page *sdk.Page, instances []sdk.Widge
 
 // pickPage shows an interactive page picker and returns the selected page ID.
 func pickPage(ctx context.Context, sdkClient *sdk.Client, title string) (string, error) {
-	fetcher := func(ctx context.Context, offset, limit int) (*tui.PageResult, error) {
+	fetcher := func(ctx context.Context, offset, limit int, searchQuery string) (*tui.PageResult, error) {
+		q := ""
+		if searchQuery != "" {
+			q = "titleLIKE" + searchQuery
+		}
 		opts := &sdk.ListPagesOptions{
 			Limit:   limit,
 			Offset:  offset,
 			OrderBy: "name",
+			Query:   q,
 		}
 		pages, err := sdkClient.ListPages(ctx, opts)
 		if err != nil {
@@ -531,7 +536,7 @@ func pickPage(ctx context.Context, sdkClient *sdk.Client, title string) (string,
 		}, nil
 	}
 
-	selected, err := tui.PickWithPagination(title, fetcher, tui.WithMaxVisible(15))
+	selected, err := tui.PickWithQueryablePagination(title, fetcher, tui.WithMaxVisible(15))
 	if err != nil {
 		return "", err
 	}

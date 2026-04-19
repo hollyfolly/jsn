@@ -49,11 +49,7 @@ func runSetup(cmd *cobra.Command, app *appctx.App) error {
 	}
 
 	fmt.Println()
-	fmt.Println("╔═══════════════════════════════════════╗")
-	fmt.Println("║     Welcome to ServiceNow CLI         ║")
-	fmt.Println("╚═══════════════════════════════════════╝")
-	fmt.Println()
-	fmt.Println("Let's get you set up. This will only take a moment.")
+	fmt.Println("→ JSN Setup")
 	fmt.Println()
 
 	cfg := app.Config.(*config.Config)
@@ -71,8 +67,7 @@ func runSetup(cmd *cobra.Command, app *appctx.App) error {
 	}
 
 	// Step 3: Save Location and Auth
-	fmt.Println("Step 3: Save Location")
-	fmt.Println()
+	fmt.Println("Save Location")
 
 	locationItems := []tui.PickerItem{
 		{ID: "local", Title: "Local", Description: ".servicenow/config.json — project-specific"},
@@ -204,30 +199,27 @@ func runSetup(cmd *cobra.Command, app *appctx.App) error {
 
 	// Show completion
 	fmt.Println()
-	fmt.Println("───────────────────────────────────────")
 	fmt.Println("✓ Setup complete!")
-	fmt.Println("───────────────────────────────────────")
 	fmt.Println()
-	fmt.Printf("Instance: %s\n", instanceURL)
-	fmt.Printf("Profile:  %s\n", profileName)
+	fmt.Printf("  Instance: %s\n", instanceURL)
+	fmt.Printf("  Profile:  %s\n", profileName)
 	fmt.Println()
 
 	// Find the jsn binary to show correct command examples
 	jsnCmd := findJSNBinary()
 
-	fmt.Println("Try these commands:")
-	fmt.Printf("  %s tables list          List available tables\n", jsnCmd)
-	fmt.Printf("  %s tables get incident  Get an incident record\n", jsnCmd)
-	fmt.Printf("  %s auth status          Check authentication status\n", jsnCmd)
+	fmt.Println("Next steps:")
+	fmt.Printf("  %s records --table change_request   Browse change requests\n", jsnCmd)
+	fmt.Printf("  %s rules --table incident           Business rules\n", jsnCmd)
+	fmt.Printf("  %s flows                            Explore flows\n", jsnCmd)
 	fmt.Println()
 
 	return nil
 }
 
 func setupInstanceURL(cfg *config.Config) (string, error) {
-	fmt.Println("Step 1: Instance URL")
+	fmt.Println("Instance URL")
 	fmt.Println()
-	fmt.Println("Enter your ServiceNow instance URL.")
 	fmt.Println("Examples:")
 	fmt.Println("  https://mycompany.service-now.com")
 	fmt.Println("  https://dev12345.service-now.com")
@@ -274,10 +266,9 @@ func setupInstanceURL(cfg *config.Config) (string, error) {
 }
 
 func setupProfileName(cfg *config.Config) (string, error) {
-	fmt.Println("Step 2: Profile Name")
+	fmt.Println("Profile Name")
 	fmt.Println()
-	fmt.Println("Choose a name for this configuration profile.")
-	fmt.Println("Examples: prod, dev, sandbox, mycompany")
+	fmt.Println("Examples: prod, dev, sandbox")
 	fmt.Println()
 
 	// Suggest a default based on instance URL
