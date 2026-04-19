@@ -37,22 +37,24 @@ func newFlowsCreateCmd() *cobra.Command {
 		Long: `Create a new Flow Designer flow or subflow.
 
 Interactive Mode (default in TTY):
-  When running in a terminal without required flags, you'll be prompted
-  interactively to configure the flow step by step.
+  When running in a terminal, interactive mode is enabled by default.
+  You'll be prompted to configure the flow step by step. Values provided
+  via flags are used as defaults in the prompts.
 
 Non-Interactive Mode (scripts/CI):
-  Use flags to specify all options. The --name flag is required.
+  Use --no-interactive flag to disable interactive prompts.
+  The --name flag is required in non-interactive mode.
 
 Examples:
-  # Interactive (TTY)
+  # Interactive (TTY) - will prompt for missing values
   jsn flows create
-
-  # Non-interactive with flags
   jsn flows create --name "My Flow" --type flow
-  jsn flows create --name "My Helper" --type subflow \
+
+  # Non-interactive (scripts)
+  jsn flows create --name "My Flow" --type flow --no-interactive
+  jsn flows create --name "My Helper" --type subflow --no-interactive \
     --input "record_id:string:Record ID:true" \
     --output "result:boolean:Success"
-  jsn flows create --name "System Flow" --active --run-as system
 
 Input/Output Format:
   --input "name:type:label:required"
@@ -73,7 +75,8 @@ Input/Output Format:
 	cmd.Flags().StringVar(&flags.scope, "scope", "", "Scope (defaults to current scope)")
 	cmd.Flags().StringArrayVar(&flags.inputs, "input", nil, "Input variable (format: name:type:label:required)")
 	cmd.Flags().StringArrayVar(&flags.outputs, "output", nil, "Output variable (format: name:type:label)")
-	cmd.Flags().BoolVar(&flags.interactive, "interactive", false, "Force interactive mode (default auto-detected)")
+	cmd.Flags().BoolVar(&flags.interactive, "interactive", false, "Force interactive mode (default in TTY)")
+	cmd.Flags().Bool("no-interactive", false, "Disable interactive mode (for scripts)")
 
 	return cmd
 }
@@ -94,7 +97,9 @@ func runFlowsCreate(cmd *cobra.Command, flags flowsCreateFlags) error {
 	isTerminal := output.IsTTY(cmd.OutOrStdout())
 
 	// Determine if we should use interactive mode
-	useInteractive := flags.interactive || (isTerminal && flags.name == "")
+	// Default to interactive in TTY unless explicitly disabled with --no-interactive
+	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
+	useInteractive := !noInteractive && (flags.interactive || isTerminal)
 
 	// Interactive mode: prompt for missing values
 	if useInteractive {
