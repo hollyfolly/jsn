@@ -66,8 +66,10 @@ func (c *Client) Eval(ctx context.Context, script string, opts EvalOptions) (*Ev
 			return nil, fmt.Errorf("seeding cookies: %w", err)
 		}
 	} else if authType == "oauth" {
-		// OAuth is not supported for script evaluation - requires session-based auth
-		return nil, fmt.Errorf("OAuth authentication is not supported for script evaluation. Please use Basic Auth or g_ck token")
+		// OAuth: make an authenticated REST call to exchange the token for session cookies
+		if err := c.establishOAuthSession(ctx, sessionClient); err != nil {
+			return nil, fmt.Errorf("establishing OAuth session: %w", err)
+		}
 	} else {
 		// Basic auth (or g_ck without cookies): make a REST call to establish a session
 		if err := c.establishSession(ctx, sessionClient); err != nil {
@@ -159,6 +161,34 @@ func (c *Client) establishSession(ctx context.Context, sessionClient *http.Clien
 	// Check if we're logged in
 	if resp.Header.Get("X-Is-Logged-In") == "false" {
 		return fmt.Errorf("authentication failed: not logged in")
+	}
+
+	return nil
+}
+
+// establishOAuthSession makes an authenticated REST API call with OAuth to capture session cookies.
+func (c *Client) establishOAuthSession(ctx context.Context, sessionClient *http.Client) error {
+	endpoint := c.baseURL + "/api/now/table/sys_user?sysparm_limit=1&sysparm_fields=sys_id"
+
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	token, _, _ := c.getAuth()
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := sessionClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("OAuth session auth failed with status %d", resp.StatusCode)
 	}
 
 	return nil
