@@ -358,6 +358,24 @@ func runFlowsAddTrigger(cmd *cobra.Command, flowID string, flags flowsAddTrigger
 		return output.ErrUsage("table name is required (use --table or run interactively)")
 	}
 
+	// Application trigger path (service_catalog, etc.)
+	if flags.triggerType == "service_catalog" {
+		opts := sdk.CreateApplicationTriggerOptions{
+			FlowID:      flowID,
+			Application: flags.triggerType,
+		}
+		if err := sdkClient.CreateApplicationTrigger(cmd.Context(), opts); err != nil {
+			return fmt.Errorf("failed to create trigger: %w", err)
+		}
+
+		outputWriter := appCtx.Output.(*output.Writer)
+		return outputWriter.OK(map[string]interface{}{
+			"flow":        flowID,
+			"trigger":     flags.triggerType,
+			"application": flags.triggerType,
+		}, output.WithSummary(fmt.Sprintf("Added %s trigger to flow", flags.triggerType)))
+	}
+
 	// Map trigger type
 	triggerType := flags.triggerType
 	if triggerType == "create" {
