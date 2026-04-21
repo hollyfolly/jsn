@@ -221,8 +221,51 @@ func runFlowsTriggersRemove(cmd *cobra.Command, flowID, triggerID string) error 
 		return output.ErrAuth("no instance configured. Run: jsn setup")
 	}
 
-	// TODO: Implement trigger removal via SDK
-	return fmt.Errorf("trigger removal not yet implemented")
+	outputWriter := appCtx.Output.(*output.Writer)
+	sdkClient := appCtx.SDK.(*sdk.Client)
+	ctx := cmd.Context()
+
+	// Resolve flow ID
+	flow, err := sdkClient.GetFlow(ctx, flowID)
+	if err != nil {
+		return fmt.Errorf("failed to resolve flow: %w", err)
+	}
+	resolvedFlowID := flow.SysID
+
+	// Verify the trigger exists and belongs to this flow
+	inspection, err := sdkClient.InspectFlow(ctx, resolvedFlowID)
+	if err != nil {
+		return fmt.Errorf("failed to inspect flow: %w", err)
+	}
+
+	var triggerFound bool
+	for _, trigger := range inspection.TriggerInstances {
+		if getString(trigger, "sys_id") == triggerID {
+			triggerFound = true
+			break
+		}
+	}
+	if !triggerFound {
+		return fmt.Errorf("trigger %s not found on flow %s", triggerID, inspection.Flow.Name)
+	}
+
+	// Delete the trigger instance
+	if err := sdkClient.DeleteRecord(ctx, "sys_hub_trigger_instance", triggerID); err != nil {
+		return fmt.Errorf("failed to delete trigger: %w", err)
+	}
+
+	// Save the flow to regenerate payload without the trigger
+	if err := sdkClient.SaveFlow(ctx, resolvedFlowID); err != nil {
+		return fmt.Errorf("trigger deleted but failed to save flow: %w", err)
+	}
+
+	return outputWriter.OK(map[string]any{
+		"flow":      inspection.Flow.Name,
+		"trigger":   triggerID,
+		"remaining": len(inspection.TriggerInstances) - 1,
+	},
+		output.WithSummary(fmt.Sprintf("Removed trigger %s from flow '%s'", triggerID, inspection.Flow.Name)),
+	)
 }
 
 // newFlowsAddTriggerCmd creates the flows add-trigger command.
