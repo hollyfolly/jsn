@@ -607,14 +607,17 @@ func buildGetCatalogVariablesMutation(flowSysID, catalogItemSysID, catalogItemNa
 	// Generate a unique UI identifier for the action
 	actionID := generateUIUniqueIdentifier()
 
-	// Build the template_catalog_item JSON value
-	templateValue := fmt.Sprintf(`{"display":"%s","value":"%s","data_source":"sc_cat_item"}`,
+	// Build the template_catalog_item JSON value - needs to be escaped for GraphQL
+	// The JSON object needs its quotes escaped for the GraphQL string
+	templateJSON := fmt.Sprintf(`{"display":"%s","value":"%s","data_source":"sc_cat_item"}`,
 		catalogItemName, catalogItemSysID)
+	// Escape quotes for GraphQL string embedding
+	templateValue := strings.ReplaceAll(templateJSON, `"`, `\"`)
 
 	return fmt.Sprintf(`mutation {
   global {
     snFlowDesigner {
-      flow(flowPatch: {flowId: "%s", labelCache: {insert: [{name: "Service Catalog_1.request_item", label: "Trigger - Service Catalog➛Requested Item Record", reference: "sc_req_item", reference_display: "Requested Item", type: "reference", base_type: "reference", attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,default_search_field=number,", usedInstances: [{uiUniqueIdentifier: "%s", inputName: "requested_item"}], choices: {}}]}, actions: {insert: [{uiUniqueIdentifier: "%s", type: "action", actionId: "a9e5444e73303300c1b30e4efaf6a7b7", name: "Get Catalog Variables", inputs: [{name: "requested_item", value: {schemaless: false, schemalessValue: "", value: "{{Service Catalog_1.request_item}}"}}, {name: "template_catalog_item", value: {schemaless: false, schemalessValue: "", value: "%s"}}]}]}}) {
+      flow(flowPatch: {flowId: "%s", labelCache: {insert: [{name: "Service Catalog_1.request_item", label: "Trigger - Service Catalog➛Requested Item Record", reference: "sc_req_item", reference_display: "Requested Item", type: "reference", base_type: "reference", attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,default_search_field=number,", usedInstances: [{uiUniqueIdentifier: "%s", inputName: "requested_item"}], choices: {}}]}, actions: {insert: [{actionTypeSysId: "330ba3abc31013002841b63b12d3aee8", metadata: "{\"predicates\":[]}", flowSysId: "%s", generationSource: "", order: "1", parent: "", uiUniqueIdentifier: "%s", type: "action", parentUiId: "", inputs: [{id: "bf0ba3abc31013002841b63b12d3aeea", name: "requested_item", children: [], displayValue: {value: ""}, value: {value: "{{Service Catalog_1.request_item}}"}, parameter: {id: "bf0ba3abc31013002841b63b12d3aeea", label: "Submitted Request", name: "requested_item", type: "reference", type_label: "Reference", hint: "", order: 0, extended: false, mandatory: true, readonly: false, maxsize: 32, data_structure: "", reference: "sc_req_item", reference_display: "Requested Item", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: false, dependent_on: "", show_ref_finder: false, local: false, searchField: "number", attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,only_droppable=true,", sys_class_name: "", children: [], dynamic: null}}, {id: "bb0ba3abc31013002841b63b12d3aef1", name: "template_catalog_item", children: [], displayValue: {value: ""}, value: {value: "%s"}, parameter: {id: "bb0ba3abc31013002841b63b12d3aef1", label: "Template Catalog Items and Variable Sets", name: "template_catalog_item", type: "reference", type_label: "Reference", hint: "", order: 1, extended: false, mandatory: true, readonly: false, maxsize: 32, data_structure: "", reference: "st_sys_catalog_items_and_variable_sets", reference_display: "Catalog Items and Variable Sets", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: false, dependent_on: "", show_ref_finder: false, local: false, searchField: "name", attributes: "element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,is_remote_table_reference=true,hide_runtime_value_in_opsview=true,show_search=true,", sys_class_name: "", children: [], dynamic: null}}, {id: "7b0ba3abc31013002841b63b12d3aef7", name: "catalog_variables", children: [], displayValue: {value: ""}, value: {value: ""}, parameter: {id: "7b0ba3abc31013002841b63b12d3aef7", label: "Catalog Variables", name: "catalog_variables", type: "slushbucket", type_label: "Slush Bucket", hint: "", order: 2, extended: false, mandatory: false, readonly: false, maxsize: 12000, data_structure: "", reference: "", reference_display: "", ref_qual: "", choiceOption: "", table: "", columnName: "", defaultValue: "", use_dependent: false, dependent_on: "", show_ref_finder: false, local: false, attributes: "is_flatten_variables_needed=false,element_mapping_provider=com.glide.flow_design.action.data.FlowDesignVariableMapper,hide_runtime_value_in_opsview=true,include_multirow_variablesets=true,use_flow_designer_wrapper=true,preserve_selected=true,source_table=item_option_new,", sys_class_name: "", children: [], dynamic: null}}]}]}}) {
         id
         actions {
           inserts {
@@ -632,7 +635,7 @@ func buildGetCatalogVariablesMutation(flowSysID, catalogItemSysID, catalogItemNa
     }
     __typename
   }
-}`, flowSysID, actionID, actionID, templateValue)
+}`, flowSysID, actionID, flowSysID, actionID, templateValue)
 }
 
 // generateUIUniqueIdentifier generates a unique identifier for flow designer elements.

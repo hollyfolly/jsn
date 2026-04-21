@@ -356,11 +356,8 @@ func runFlowsAddTrigger(cmd *cobra.Command, flowID string, flags flowsAddTrigger
 	if flags.triggerType == "" {
 		return output.ErrUsage("trigger type is required (use --type or --schedule, or run interactively)")
 	}
-	if flags.table == "" {
-		return output.ErrUsage("table name is required (use --table or run interactively)")
-	}
 
-	// Application trigger path (service_catalog, etc.)
+	// Application trigger path (service_catalog, etc.) - doesn't need --table
 	if flags.triggerType == "service_catalog" {
 		opts := sdk.CreateApplicationTriggerOptions{
 			FlowID:      flowID,
@@ -381,6 +378,11 @@ func runFlowsAddTrigger(cmd *cobra.Command, flowID string, flags flowsAddTrigger
 			result["catalog_item"] = flags.withVariables
 		}
 		return outputWriter.OK(result, output.WithSummary(fmt.Sprintf("Added %s trigger to flow", flags.triggerType)))
+	}
+
+	// Record triggers require --table
+	if flags.table == "" {
+		return output.ErrUsage("table name is required (use --table or run interactively)")
 	}
 
 	// Map trigger type
