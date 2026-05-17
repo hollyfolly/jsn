@@ -1,0 +1,40 @@
+{
+  "name": "@jacebenson/jsn",
+  "version": "0.0.0",
+  "description": "A command-line interface for ServiceNow that follows the Unix philosophy: simple, composable, and scriptable.",
+  "homepage": "https://github.com/jacebenson/jsn#readme",
+  "bugs": {
+    "url": "https://github.com/jacebenson/jsn/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jacebenson/jsn.git"
+  },
+  "license": "MIT",
+  "author": "Jace Benson",
+  "type": "commonjs",
+  "files": [
+    "bin",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "jsn": "bin/jsn.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/npm-install.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

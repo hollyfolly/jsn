@@ -14,7 +14,8 @@
 # Compiled binaries
 /jsn
 /main
-bin/
+bin/*
+!bin/jsn.js
 
 # Dependency directories
 vendor/

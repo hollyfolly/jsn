@@ -4,13 +4,26 @@ A command-line interface for ServiceNow that follows the Unix philosophy: simple
 
 ## Installation
 
+### npm (Cross-platform — recommended for Windows)
+
+```bash
+npm install -g @jacebenson/jsn
+```
+
+Works on macOS, Linux, and Windows. The correct binary for your platform is downloaded automatically during install.
+
+### Download Binary
+
 ```bash
 # Download the latest release
 curl -L https://github.com/jacebenson/jsn/releases/latest/download/jsn-linux-amd64 -o jsn
 chmod +x jsn
 sudo mv jsn /usr/local/bin/
+```
 
-# Or install with go
+### Go Install
+
+```bash
 go install github.com/jacebenson/jsn/cmd/jsn@latest
 ```
 

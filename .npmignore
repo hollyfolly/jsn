@@ -1,0 +1,47 @@
+# Go source — not needed in npm tarball
+*.go
+go.mod
+go.sum
+internal/
+cmd/
+
+# Tests
+*_test.go
+
+# Git
+.git/
+.gitignore
+
+# CI/GitHub
+.github/
+
+# Scripts (shell scripts not needed for npm)
+scripts/*.sh
+scripts/install.sh
+scripts/pre-commit-check.sh
+
+# Docs and examples (README.md is included via files array)
+docs/
+examples/
+
+# Development artifacts
+node_modules/
+.opencode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local config
+.servicenow/
+
+# Build artifacts (the binary is downloaded)
+dist/
+jsn
+jsn.exe
+main
+
+# Project files
+PLAN-1.0.md
+ROADMAP.md
+AGENTS.md
