@@ -223,11 +223,19 @@
                 <span style="color: var(--muted);">Re-run to update</span>
             </p>
 
+            <div class="install" style="margin-top: 0.75rem;">
+                <code>npm install -g @jacebenson/jsn</code>
+                <button class="copy-btn" onclick="copyNpmInstall()">Copy</button>
+            </div>
+            <p style="text-align: center; font-size: 0.85rem; margin-top: -1rem;">
+                <span style="color: var(--muted);">Cross-platform · No Bash required · Works on Windows natively</span>
+            </p>
+
             <div style="background: rgba(255, 193, 7, 0.05); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-top: 1.5rem; font-size: 0.85rem; text-align: left;">
                 <strong style="color: var(--accent);">Requirements</strong>
                 <ul style="margin: 0.5rem 0 0 1.2rem; color: var(--muted); line-height: 1.8;">
-                    <li><strong>Windows:</strong> Git Bash (included with <a href="https://git-scm.com/download/win" style="color: var(--accent);">Git for Windows</a>)</li>
-                    <li><strong>macOS/Linux:</strong> Bash (pre-installed)</li>
+                    <li><strong>Windows:</strong> <code style="color: var(--accent);">npm install -g @jacebenson/jsn</code> (recommended) or Git Bash with <code style="color: var(--accent);">curl</code></li>
+                    <li><strong>macOS/Linux:</strong> Bash + curl or Node.js + npm</li>
                     <li><strong>For AI Agent Skills:</strong> <a href="https://nodejs.org/" style="color: var(--accent);">Node.js</a> (for npx)</li>
                 </ul>
             </div>
@@ -341,7 +349,7 @@
         function copyInstall() {
             const code = 'curl -fsSL https://jsn.jace.pro/install | bash';
             navigator.clipboard.writeText(code).then(() => {
-                const btn = document.querySelector('.copy-btn');
+                const btn = event.target;
                 btn.textContent = 'Copied!';
                 setTimeout(() => btn.textContent = 'Copy', 2000);
             }).catch(() => {
@@ -352,7 +360,28 @@
                 textarea.select();
                 document.execCommand('copy');
                 document.body.removeChild(textarea);
-                const btn = document.querySelector('.copy-btn');
+                const btn = event.target;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 2000);
+            });
+        }
+
+        // Copy npm install command
+        function copyNpmInstall() {
+            const code = 'npm install -g @jacebenson/jsn';
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = event.target;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 2000);
+            }).catch(() => {
+                // Fallback for browsers that don't support clipboard API
+                const textarea = document.createElement('textarea');
+                textarea.value = code;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                const btn = event.target;
                 btn.textContent = 'Copied!';
                 setTimeout(() => btn.textContent = 'Copy', 2000);
             });
