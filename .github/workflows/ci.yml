@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [nodejs]
   pull_request:
-    branches: [main]
+    branches: [nodejs]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -16,23 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          go-version-file: 'go.mod'
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run tests
-        run: go test -v ./...
-
-      - name: Build
-        run: go build -v -o bin/jsn ./cmd/jsn/main.go
+        run: npm test
 
       - name: Smoke test
         run: |
-          ./bin/jsn --help | head -5
+          node bin/jsn.js --help | head -5
 
   lint:
     name: Lint
@@ -40,15 +38,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          go-version-file: 'go.mod'
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Install golangci-lint
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Run golangci-lint
-        run: golangci-lint run --timeout=5m ./...
+      - name: Run ESLint
+        run: npm run lint

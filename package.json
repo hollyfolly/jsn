@@ -10,7 +10,9 @@
   "scripts": {
     "test": "node --test test/**/*.test.js",
     "lint": "npx eslint src/ bin/ test/",
-    "start": "node bin/jsn.js"
+    "start": "node bin/jsn.js",
+    "tag-reminder": "node scripts/tag-reminder.js",
+    "release": "node scripts/release.js"
   },
   "keywords": [
     "servicenow",

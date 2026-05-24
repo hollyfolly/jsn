@@ -1,9 +1,9 @@
-name: Build and Release
+name: Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'node-v*'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -12,86 +12,25 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          go-version-file: 'go.mod'
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run tests
-        run: go test ./...
-
-      - name: Build binaries
-        run: |
-          # Create output directory
-          mkdir -p dist
-
-          # Version info from tag
-          VERSION="${{ github.ref_name }}"
-          COMMIT="$(git rev-parse --short HEAD)"
-          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          PKG="github.com/jacebenson/jsn/internal/version"
-          LDFLAGS="-s -w -X ${PKG}.Version=${VERSION#v} -X ${PKG}.Commit=${COMMIT} -X ${PKG}.Date=${DATE}"
-
-          # Build for multiple platforms
-          GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/jsn_${VERSION}_linux_amd64 ./cmd/jsn/main.go
-          GOOS=linux GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/jsn_${VERSION}_linux_arm64 ./cmd/jsn/main.go
-          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/jsn_${VERSION}_darwin_amd64 ./cmd/jsn/main.go
-          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/jsn_${VERSION}_darwin_arm64 ./cmd/jsn/main.go
-          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/jsn_${VERSION}_windows_amd64.exe ./cmd/jsn/main.go
-
-      - name: Create archives
-        run: |
-          cd dist
-          for file in jsn_*; do
-            # Rename to just 'jsn' or 'jsn.exe' before archiving
-            if [[ "$file" == *.exe ]]; then
-              mv "$file" "jsn.exe"
-              zip "${file%.exe}.zip" "jsn.exe"
-              rm "jsn.exe"
-            else
-              mv "$file" "jsn"
-              tar -czf "${file}.tar.gz" "jsn"
-              rm "jsn"
-            fi
-          done
-          ls -la
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: dist/*
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: binaries
-          path: dist
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dist/*
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm test
 
   npm-publish:
-    needs: release
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,19 +41,10 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Sync package.json version with release
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '${VERSION}';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-            console.log('Set package.json version to ${VERSION}');
-          "
+      - name: Install dependencies
+        run: npm ci
 
       - name: Publish to npm
-        run: npm publish --access public
+        run: npm publish --tag node --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
