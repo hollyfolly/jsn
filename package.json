@@ -8,7 +8,7 @@
   },
   "main": "src/cli.js",
   "scripts": {
-    "test": "node --test test/**/*.test.js",
+    "test": "node --test $(find test -name '*.test.js')",
     "lint": "npx eslint src/ bin/ test/",
     "start": "node bin/jsn.js",
     "tag-reminder": "node scripts/tag-reminder.js",
