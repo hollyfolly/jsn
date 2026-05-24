@@ -178,11 +178,11 @@ export class AuthManager {
     const open = (await import('node:child_process')).spawn;
     const platform = process.platform;
     const cmd = platform === 'darwin' ? 'open' : platform === 'win32' ? 'start' : 'xdg-open';
-    try {
-      open(cmd, [authURL], { detached: true, stdio: 'ignore' });
-    } catch {
-      // ignore
-    }
+    const child = open(cmd, [authURL], { detached: true, stdio: 'ignore' });
+    child.on('error', () => {
+      // xdg-open not installed — user will open the URL manually
+    });
+    child.unref();
 
     console.log('After authenticating in the browser, copy the authorization code shown on the page.');
     console.log('(input is hidden for security — just paste and press Enter)');
