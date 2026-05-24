@@ -19,7 +19,7 @@ function stripAnsi(str) {
   return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\]8;;[^\x07]*\x07|\x1b\]8;;\x07/g, '');
 }
 
-function visibleWidth(str) {
+function _visibleWidth(str) {
   return stripAnsi(str).length;
 }
 

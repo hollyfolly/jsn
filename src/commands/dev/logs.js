@@ -1,4 +1,4 @@
-import { formatRecordForDisplay, getStringField } from '../../helpers.js';
+import { formatRecordForDisplay } from '../../helpers.js';
 
 export function logsCmd(wrap) {
   return {

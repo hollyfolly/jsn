@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import readline from 'node:readline';
 import { globalConfigDir, normalizeInstanceURL } from './config.js';
-import { errAuth, errNetwork } from './errors.js';
+import { errAuth } from './errors.js';
 
 const DEFAULT_OAUTH_CLIENT_ID = '543e5655f77746a28228c6009a599dfb';
 const REDIRECT_URI = '/sdk-oauth.do';

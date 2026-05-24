@@ -14,7 +14,7 @@ export function authCmd(wrap) {
             if (!instance) {
               throw new Error('No instance configured. Set via --instance or run: jsn setup');
             }
-            const creds = await app.auth.login(instance);
+            await app.auth.login(instance);
             app.ok({ authenticated: true, instance }, { summary: `Authenticated with ${instance}` });
           }),
         })
@@ -51,7 +51,7 @@ export function authCmd(wrap) {
             if (!instance) {
               throw new Error('No instance configured');
             }
-            const creds = await app.auth.refreshToken(instance, await app.auth.getCredentialsFor(instance));
+            await app.auth.refreshToken(instance, await app.auth.getCredentialsFor(instance));
             app.ok({ refreshed: true, instance }, { summary: `Token refreshed for ${instance}` });
           }),
         })

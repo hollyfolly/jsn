@@ -3,12 +3,12 @@
 import { AuthManager } from './auth.js';
 import { SDKClient } from './sdk.js';
 import { OutputWriter, FormatAuto, FormatJSON, FormatMarkdown, FormatQuiet, FormatStyled } from './output.js';
-import { getEffectiveInstance, normalizeInstanceURL } from './config.js';
+import { getEffectiveInstance } from './config.js';
 import { extractProfileName } from './helpers.js';
 import { getCurrentUser, getCurrentApplication, getCurrentUpdateSet } from './context.js';
 import { errUsage, errAuth } from './errors.js';
 import process from 'node:process';
-import chalk from 'chalk';
+
 
 export class App {
   constructor(cfg) {

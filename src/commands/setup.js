@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import { getEffectiveInstance, normalizeInstanceURL, saveConfig, setProfile } from '../config.js';
+import { getEffectiveInstance, normalizeInstanceURL, setProfile } from '../config.js';
 
 export function setupCmd(wrap) {
   return {

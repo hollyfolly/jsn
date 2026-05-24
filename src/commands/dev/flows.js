@@ -1,4 +1,4 @@
-import { formatRecordForDisplay, getStringField, isHexString } from '../../helpers.js';
+import { formatRecordForDisplay, getStringField } from '../../helpers.js';
 
 export function flowsCmd(wrap) {
   return {
@@ -516,7 +516,7 @@ function formatTriggerCondition(condition) {
   result = result.replace(/</g, ' < ');
   result = result.replace(/LIKE/g, ' LIKE ');
   while (result.includes('  ')) {
-    result = result.replace(/  /g, ' ');
+    result = result.replace(/ {2}/g, ' ');
   }
   return result.trim();
 }

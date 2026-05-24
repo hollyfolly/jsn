@@ -1,4 +1,4 @@
-import { getEffectiveInstance, saveConfig, setProfile } from '../config.js';
+import { saveConfig } from '../config.js';
 
 export function profilesCmd(wrap) {
   return {
