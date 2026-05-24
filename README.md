@@ -16,8 +16,10 @@ Both versions share the same CLI interface and are tested against the same Servi
 ### npm (Node.js version — cross-platform)
 
 ```bash
-npm install -g @jacebenson/jsn
+npm install -g @jacebenson/jsn@node
 ```
+
+> **Note:** The `@node` dist-tag is required. The `latest` tag currently points to the Go shim wrapper (v1.0.1).
 
 No compilation needed. Works on macOS, Linux, and Windows with Node.js 18+.
 
