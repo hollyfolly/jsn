@@ -46,8 +46,6 @@ async function fetchExtensionChain(sdk, record) {
   return chain;
 }
 
-export const flowsCmd = (wrap) => buildDevCmd('flows', 'sys_hub_flow', ['flow'], ['name', 'active', 'description', 'sys_created_by', 'sys_updated_on'], wrap, { singular: 'flow' });
-
 export const actionsCmd = (wrap) => buildDevCmd('actions', 'sys_hub_action_type_definition', ['action'], ['name', 'active', 'sys_scope', 'sys_updated_on'], wrap, { singular: 'action', scopeValidation: true });
 
 export const includesCmd = (wrap) => buildDevCmd('includes', 'sys_script_include', ['include', 'si'], ['name', 'api_name', 'active', 'sys_scope'], wrap, { singular: 'script include', scopeValidation: true });

@@ -395,14 +395,6 @@ function detectRecord(data) {
     }
   }
 
-  // Fallback: _context.table tells us the record type explicitly
-  if (!tableName && data._context && typeof data._context === 'object') {
-    const ctxTable = data._context.table;
-    if (ctxTable) {
-      tableName = ctxTable;
-    }
-  }
-
   return { isRecord: hasSysID && (hasSysClass || tableName), tableName };
 }
 

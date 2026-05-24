@@ -36,10 +36,23 @@ async function checkScope(sdk, recordScope) {
 }
 
 export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {}) {
-  const showFields = opts.showFields || defaultColumns;
+  const showFields = opts.showFields !== undefined ? opts.showFields : null;
   const singular = toSingular(name, opts.singular);
   const readOnly = opts.readOnly || false;
   const scopeValidation = opts.scopeValidation || false;
+  const showSummary = opts.showSummary || ((record, id) => `${singular.charAt(0).toUpperCase() + singular.slice(1)}: ${getStringField(record, 'name') || id}`);
+  const showBreadcrumbs = opts.showBreadcrumbs || ((record, id) => {
+    const crumbs = [
+      { action: 'list', cmd: `jsn dev ${name} list`, description: `Back to all ${name}` },
+    ];
+    if (!readOnly) {
+      crumbs.unshift(
+        { action: 'delete', cmd: `jsn dev ${name} delete ${id}`, description: `Delete this ${singular}` },
+        { action: 'update', cmd: `jsn dev ${name} update ${id} --data '{...}'`, description: `Update this ${singular}` }
+      );
+    }
+    return crumbs;
+  });
 
   const builder = (yargs) => {
     let y = yargs
@@ -80,11 +93,11 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
           params.set('sysparm_query', `${queryField}=${id}`);
           params.set('sysparm_limit', '1');
           params.set('sysparm_display_value', 'all');
-            // Always include sys_id for record detection and hyperlinks
-            const fetchFields = showFields && showFields.length > 0
-              ? ['sys_id', ...showFields]
-              : ['sys_id'];
-            params.set('sysparm_fields', [...new Set(fetchFields)].join(','));
+          // Only restrict sysparm_fields if showFields is explicitly set.
+          // Go version fetches all fields for show unless explicitly restricted.
+          if (showFields && showFields.length > 0) {
+            params.set('sysparm_fields', [...new Set(['sys_id', ...showFields])].join(','));
+          }
           const records = await app.sdk.list(table, params);
           if (records.length === 0) {
             throw new Error(`${singular} not found: ${id}`);
@@ -98,21 +111,10 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
             await opts.onShow(records[0], app);
           }
 
-          const breadcrumbs = [
-            { action: 'list', cmd: `jsn dev ${name} list`, description: `Back to all ${name}` },
-          ];
+          const summary = typeof showSummary === 'function' ? showSummary(records[0], id) : showSummary;
+          const breadcrumbs = typeof showBreadcrumbs === 'function' ? showBreadcrumbs(records[0], id) : showBreadcrumbs;
 
-          if (!readOnly) {
-            breadcrumbs.unshift(
-              { action: 'delete', cmd: `jsn dev ${name} delete ${id}`, description: `Delete this ${singular}` },
-              { action: 'update', cmd: `jsn dev ${name} update ${id} --data '{...}'`, description: `Update this ${singular}` }
-            );
-          }
-
-          app.ok(records[0], {
-            summary: `${singular}: ${getStringField(records[0], 'name') || id}`,
-            breadcrumbs,
-          });
+          app.ok(records[0], { summary, breadcrumbs });
         }),
       });
 

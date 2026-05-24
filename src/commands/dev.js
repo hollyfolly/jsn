@@ -1,12 +1,13 @@
 // Parent dev command
 
 import {
-  flowsCmd, actionsCmd, includesCmd, rulesCmd,
+  actionsCmd, includesCmd, rulesCmd,
   clientScriptsCmd, uiActionsCmd, uiPoliciesCmd,
   tablesCmd, columnsCmd, importCmd,
   spPagesCmd, spWidgetsCmd, uiPagesCmd, appMenuCmd, scRAPICmd,
   aclsCmd, rolesCmd, propertiesCmd,
 } from './dev/_simple.js';
+import { flowsCmd } from './dev/flows.js';
 import { formsCmd } from './dev/forms.js';
 import { listsCmd } from './dev/lists.js';
 import { updateSetsCmd } from './dev/updatesets.js';
