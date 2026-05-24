@@ -2,17 +2,26 @@
 
 A command-line interface for ServiceNow that follows the Unix philosophy: simple, composable, and scriptable.
 
+## Versions
+
+| Version | Language | Branch | Install | Status |
+|---------|----------|--------|---------|--------|
+| Go | Go | `main` | Binary / `go install` | Stable |
+| Node.js | JavaScript (Node 18+) | `nodejs` | `npm install -g` | Active development |
+
+Both versions share the same CLI interface and are tested against the same ServiceNow PDI.
+
 ## Installation
 
-### npm (Cross-platform — recommended for Windows)
+### npm (Node.js version — cross-platform)
 
 ```bash
 npm install -g @jacebenson/jsn
 ```
 
-Works on macOS, Linux, and Windows. The correct binary for your platform is downloaded automatically during install.
+No compilation needed. Works on macOS, Linux, and Windows with Node.js 18+.
 
-### Download Binary
+### Download Binary (Go version)
 
 ```bash
 # Download the latest release
@@ -21,7 +30,7 @@ chmod +x jsn
 sudo mv jsn /usr/local/bin/
 ```
 
-### Go Install
+### Go Install (Go version)
 
 ```bash
 go install github.com/jacebenson/jsn/cmd/jsn@latest
@@ -307,7 +316,7 @@ jsn auth status
 jsn auth logout
 ```
 
-Credentials are securely stored in your OS keychain (or file fallback at `~/.config/servicenow/credentials/`).
+Credentials are stored in `~/.config/servicenow/credentials/` (file-based, OS keychain coming soon).
 
 ## Environment Variables
 
@@ -330,6 +339,8 @@ jsn incidents list
 ```
 
 ## Shell Completion
+
+> **Note:** Shell completion is available in the Go version only.
 
 ```bash
 # Bash
@@ -381,10 +392,39 @@ Error (usage): Instance URL required. Set via --instance flag, SERVICENOW_INSTAN
 - `--instance` flag
 - `SERVICENOW_INSTANCE_URL` environment variable
 
+## Development
+
+This repository maintains two parallel implementations:
+
+- **`main`** — Go implementation (stable)
+- **`nodejs`** — Node.js implementation (active development)
+
+Both branches share the same CLI interface and are kept in sync for feature parity.
+
+### Node.js version
+
+```bash
+git checkout nodejs
+npm install
+npm test        # Run tests
+npm run lint    # Run ESLint
+npm run start   # Run CLI locally
+```
+
+### Releasing
+
+```bash
+# From nodejs branch — creates node-v* tag and publishes to npm
+npm run release -- patch
+
+# From main branch — creates go-v* tag and builds binaries
+npm run release -- patch
+```
+
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (target the appropriate branch: `main` or `nodejs`)
 3. Make your changes
 4. Add tests
 5. Submit a pull request
