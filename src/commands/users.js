@@ -1,4 +1,4 @@
-import { formatRecordForDisplay } from '../helpers.js';
+import { formatRecordForDisplay, getStringField, interactiveList } from '../helpers.js';
 
 export function usersCmd(wrap) {
   return {
@@ -17,6 +17,17 @@ export function usersCmd(wrap) {
             .option('limit', { alias: 'l', type: 'number', default: 20, describe: 'Max records' }),
           handler: wrap(async (argv, app) => {
             const columns = argv.columns ? argv.columns.split(',') : ['user_name', 'name', 'email', 'active'];
+            const query = argv.query || '';
+
+            const picked = await interactiveList({
+              app, table: 'sys_user', singular: 'user', columns, limit: argv.limit, query, labelField: 'user_name',
+              formatLabel: r => `${getStringField(r, 'user_name')} (${getStringField(r, 'name') || '-'})`,
+            });
+            if (picked) {
+              picked._context = { instance_url: app.getEffectiveInstance(), table: 'sys_user' };
+              return app.ok(picked, { summary: `User: ${getStringField(picked, 'user_name')}` });
+            }
+
             const params = new URLSearchParams();
             params.set('sysparm_limit', String(argv.limit));
             params.set('sysparm_display_value', 'all');

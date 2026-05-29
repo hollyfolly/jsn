@@ -1,4 +1,4 @@
-import { formatRecordForDisplay, buildQuerySuffix, parseDataArg } from '../helpers.js';
+import { formatRecordForDisplay, buildQuerySuffix, parseDataArg, getStringField, interactiveList } from '../helpers.js';
 
 const tableDefaultColumns = {
   incident: ['number', 'short_description', 'priority', 'state', 'assigned_to'],
@@ -37,6 +37,22 @@ export function recordsCmd(wrap) {
           handler: wrap(async (argv, app) => {
             const table = argv.table;
             const columns = argv.columns ? argv.columns.split(',') : getDefaultColumns(table);
+            const query = argv.query || '';
+
+            // Interactive picker
+            const picked = await interactiveList({
+              app, table, singular: 'record', columns, limit: argv.limit, query, labelField: 'sys_id',
+              formatLabel: r => {
+                const cols = getDefaultColumns(table);
+                return cols.map(c => `${c}: ${getStringField(r, c) || '-'}`).join(' | ');
+              },
+            });
+            if (picked) {
+              picked._context = { instance_url: app.getEffectiveInstance(), table };
+              return app.ok(picked, { summary: `Record from ${table}` });
+            }
+
+            // Text/table fallback
             const params = new URLSearchParams();
             params.set('sysparm_limit', String(argv.limit));
             params.set('sysparm_offset', String(argv.offset));

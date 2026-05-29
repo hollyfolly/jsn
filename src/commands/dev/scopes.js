@@ -1,4 +1,4 @@
-import { formatRecordForDisplay, getStringField } from '../../helpers.js';
+import { formatRecordForDisplay, getStringField, interactiveList } from '../../helpers.js';
 
 export function scopesCmd(wrap) {
   return {
@@ -17,6 +17,17 @@ export function scopesCmd(wrap) {
             .option('limit', { alias: 'l', type: 'number', default: 20, describe: 'Max records' }),
           handler: wrap(async (argv, app) => {
             const columns = argv.columns ? argv.columns.split(',') : ['name', 'scope', 'short_description', 'active'];
+            const query = argv.query || '';
+
+            const picked = await interactiveList({
+              app, table: 'sys_scope', singular: 'scope', columns, limit: argv.limit, query, labelField: 'name',
+              formatLabel: r => `${getStringField(r, 'name')} [${getStringField(r, 'scope') || '?'}]`,
+            });
+            if (picked) {
+              picked._context = { instance_url: app.getEffectiveInstance(), table: 'sys_scope' };
+              return app.ok(picked, { summary: `Scope: ${getStringField(picked, 'name')}` });
+            }
+
             const params = new URLSearchParams();
             params.set('sysparm_limit', String(argv.limit));
             params.set('sysparm_display_value', 'all');

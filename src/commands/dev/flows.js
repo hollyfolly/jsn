@@ -1,4 +1,4 @@
-import { formatRecordForDisplay, getStringField } from '../../helpers.js';
+import { formatRecordForDisplay, getStringField, interactiveList } from '../../helpers.js';
 
 export function flowsCmd(wrap) {
   return {
@@ -17,6 +17,23 @@ export function flowsCmd(wrap) {
             .option('limit', { alias: 'l', type: 'number', default: 20, describe: 'Max records' }),
           handler: wrap(async (argv, app) => {
             const columns = argv.columns ? argv.columns.split(',') : ['name', 'active', 'description', 'sys_created_by', 'sys_updated_on'];
+            const query = argv.query || '';
+
+            // Interactive picker
+            const picked = await interactiveList({
+              app, table: 'sys_hub_flow', singular: 'flow', columns, limit: argv.limit, query, labelField: 'name',
+              formatLabel: r => `${getStringField(r, 'name')} ${getStringField(r, 'active') === 'true' ? '' : '[inactive]'}`,
+            });
+            if (picked) {
+              const inspection = await app.sdk.inspectFlow(picked.sys_id);
+              const formatted = formatFlowInspection(inspection, app.getEffectiveInstance());
+              return app.ok({ ...inspection, _formatted: formatted }, {
+                summary: `Flow: ${inspection.flow.name}`,
+                breadcrumbs: [{ action: 'list', cmd: 'jsn dev flows list', description: 'Back to all flows' }],
+              });
+            }
+
+            // Text/table fallback
             const params = new URLSearchParams();
             params.set('sysparm_limit', String(argv.limit));
             params.set('sysparm_display_value', 'all');

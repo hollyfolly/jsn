@@ -1,4 +1,4 @@
-import { formatRecordForDisplay } from '../../helpers.js';
+import { formatRecordForDisplay, interactiveList, getStringField } from '../../helpers.js';
 
 export function logsCmd(wrap) {
   return {
@@ -17,11 +17,24 @@ export function logsCmd(wrap) {
             .option('limit', { alias: 'l', type: 'number', default: 50, describe: 'Max records' }),
           handler: wrap(async (argv, app) => {
             const columns = argv.columns ? argv.columns.split(',') : ['level', 'message', 'source', 'created'];
+            const query = argv.query || '';
+
+            // Try interactive picker first
+            const picked = await interactiveList({
+              app, table: 'syslog', singular: 'log entry', columns, limit: argv.limit, query, labelField: 'message',
+              formatLabel: r => `[${getStringField(r, 'level') || '?'}] ${(getStringField(r, 'message') || '').substring(0, 80)}`,
+            });
+            if (picked) {
+              picked._context = { instance_url: app.getEffectiveInstance(), table: 'syslog' };
+              return app.ok(picked, { summary: `Log entry` });
+            }
+
+            // Fall back to text/table
             const params = new URLSearchParams();
             params.set('sysparm_limit', String(argv.limit));
             params.set('sysparm_display_value', 'all');
             params.set('sysparm_fields', ['sys_id', ...columns].join(','));
-            const q = argv.query ? argv.query + '^ORDERBYDESCsys_created_on' : 'ORDERBYDESCsys_created_on';
+            const q = query ? query + '^ORDERBYDESCsys_created_on' : 'ORDERBYDESCsys_created_on';
             params.set('sysparm_query', q);
             const records = await app.sdk.list('syslog', params);
             app.ok({
