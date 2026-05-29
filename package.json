@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@inquirer/search": "^4.2.0",
     "globals": "^17.6.0"
   },
   "files": [

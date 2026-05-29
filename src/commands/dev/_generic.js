@@ -3,7 +3,7 @@
 import { formatRecordForDisplay, getStringField, isHexString, parseDataArg } from '../../helpers.js';
 import { getCurrentUser, getCurrentApplication } from '../../context.js';
 import readline from 'node:readline';
-import { select } from '@inquirer/prompts';
+import search from '@inquirer/search';
 import { isTTY, FormatAuto } from '../../output.js';
 
 function vowelArticle(word) {
@@ -124,9 +124,13 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
 
             let selectedName;
             try {
-              selectedName = await select({
+              selectedName = await search({
                 message: `Select ${vowelArticle(singular)} ${singular}:`,
-                choices,
+                source: async (input) => {
+                  if (!input) return choices;
+                  const term = input.toLowerCase();
+                  return choices.filter(c => c.name.toLowerCase().includes(term));
+                },
               });
             } catch (err) {
               if (err.name === 'ExitPromptError' || (err.message && err.message.includes('force closed'))) {

@@ -2,7 +2,7 @@
 // Used by incidents, changes, requests, tasks, and most dev subcommands
 
 import { getStringField, formatRecordForDisplay, buildQuerySuffix } from '../helpers.js';
-import { select } from '@inquirer/prompts';
+import search from '@inquirer/search';
 import { isTTY, FormatAuto } from '../output.js';
 
 export function buildTicketCommands(table, displayName, alias, defaultColumns, stateMap, iconFn, wrap) {
@@ -70,9 +70,13 @@ export function buildTicketCommands(table, displayName, alias, defaultColumns, s
 
               let selectedNumber;
               try {
-                selectedNumber = await select({
+                selectedNumber = await search({
                   message: `Select a ${displayName.slice(0, -1)}:`,
-                  choices,
+                  source: async (input) => {
+                    if (!input) return choices;
+                    const term = input.toLowerCase();
+                    return choices.filter(c => c.name.toLowerCase().includes(term));
+                  },
                 });
               } catch (err) {
                 if (err.name === 'ExitPromptError' || (err.message && err.message.includes('force closed'))) {
