@@ -89,8 +89,57 @@ export function scopesCmd(wrap) {
             app.ok({ scope: argv.scope, sys_id: scopeSysID }, { summary: `Current scope: ${argv.scope}` });
           }),
         })
+        .command({
+          command: 'create',
+          describe: 'Create a new application scope',
+          builder: (y) => y
+            .option('name', { alias: 'n', type: 'string', demandOption: true, describe: 'Application name' })
+            .option('scope', { type: 'string', describe: 'Scope value (auto-generated from name if omitted)' }),
+          handler: wrap(async (argv, app) => {
+            let scope = argv.scope;
+            if (!scope) {
+              // Auto-generate scope from name: lowercase, replace spaces/special chars
+              scope = 'x_' + argv.name.toLowerCase()
+                .replace(/[^a-z0-9_]/g, '_')
+                .replace(/_+/g, '_')
+                .replace(/^_|_$/g, '')
+                .substring(0, 38); // x_ + max 35 chars = 37, leave room
+            }
+            // Check for existing scope
+            const existing = await app.sdk.list('sys_scope', new URLSearchParams({
+              sysparm_query: `scope=${scope}`,
+              sysparm_limit: '1',
+            }));
+            if (existing.length > 0) {
+              throw new Error(`Scope '${scope}' already exists. Use a different name or --scope flag.`);
+            }
+            const record = await app.sdk.create('sys_scope', {
+              name: argv.name,
+              scope,
+              short_description: argv.name,
+            });
+            app.ok(record, {
+              summary: `Created scope: ${scope}`,
+              breadcrumbs: [{
+                action: 'show',
+                cmd: `jsn dev scopes show ${scope}`,
+                description: 'View the new scope',
+              }],
+            });
+          }),
+        })
 
     },
-    handler: () => {},
+    handler: (argv) => {
+      if (!argv._[1]) {
+        console.log('Manage ServiceNow application scopes.\n');
+        console.log('Commands:');
+        console.log('  list           List application scopes');
+        console.log('  show <scope>   Show a scope');
+        console.log('  set  <scope>   Set the current application scope');
+        console.log('  create         Create a new application scope');
+        console.log('\nRun "jsn dev scopes <command> --help" for details.');
+      }
+    },
   };
 }

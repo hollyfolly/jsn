@@ -90,8 +90,40 @@ export function updateSetsCmd(wrap) {
             app.ok({ update_set: argv.name, sys_id: sysID }, { summary: `Current update set: ${argv.name}` });
           }),
         })
+        .command({
+          command: 'create',
+          describe: 'Create a new update set',
+          builder: (y) => y
+            .option('name', { alias: 'n', type: 'string', demandOption: true, describe: 'Update set name' })
+            .option('description', { type: 'string', describe: 'Description' }),
+          handler: wrap(async (argv, app) => {
+            const record = await app.sdk.create('sys_update_set', {
+              name: argv.name,
+              description: argv.description || argv.name,
+              state: 'in progress',
+            });
+            app.ok(record, {
+              summary: `Created update set: ${argv.name}`,
+              breadcrumbs: [{
+                action: 'set',
+                cmd: `jsn dev updatesets set "${argv.name}"`,
+                description: 'Set as current update set',
+              }],
+            });
+          }),
+        })
 
     },
-    handler: () => {},
+    handler: (argv) => {
+      if (!argv._[1]) {
+        console.log('Manage ServiceNow update sets.\n');
+        console.log('Commands:');
+        console.log('  list           List update sets');
+        console.log('  show <name>    Show an update set');
+        console.log('  set  <name>    Set the current update set');
+        console.log('  create         Create a new update set');
+        console.log('\nRun "jsn dev updatesets <command> --help" for details.');
+      }
+    },
   };
 }
