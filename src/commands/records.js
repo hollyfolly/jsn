@@ -1,4 +1,4 @@
-import { formatRecordForDisplay, buildQuerySuffix } from '../helpers.js';
+import { formatRecordForDisplay, buildQuerySuffix, parseDataArg } from '../helpers.js';
 
 const tableDefaultColumns = {
   incident: ['number', 'short_description', 'priority', 'state', 'assigned_to'],
@@ -99,9 +99,10 @@ export function recordsCmd(wrap) {
           describe: 'Create a new record',
           builder: (y) => y
             .option('table', { type: 'string', demandOption: true, describe: 'Table name' })
-            .option('data', { type: 'string', demandOption: true, describe: 'JSON fields (e.g. \'{"state":"2"}\')' }),
+            .option('data', { type: 'string', describe: 'JSON fields (e.g. \'{"state":"2"}\')' })
+            .option('data-file', { type: 'string', describe: 'Read JSON payload from file' }),
           handler: wrap(async (argv, app) => {
-            const recordData = JSON.parse(argv.data);
+            const recordData = parseDataArg(argv);
             const record = await app.sdk.create(argv.table, recordData);
             app.ok(record, { summary: `Created record in ${argv.table}` });
           }),
@@ -112,9 +113,10 @@ export function recordsCmd(wrap) {
           builder: (y) => y
             .option('table', { type: 'string', demandOption: true, describe: 'Table name' })
             .option('sys-id', { type: 'string', demandOption: true, describe: 'Record sys_id' })
-            .option('data', { type: 'string', demandOption: true, describe: 'JSON fields (e.g. \'{"state":"2"}\')' }),
+            .option('data', { type: 'string', describe: 'JSON fields (e.g. \'{"state":"2"}\')' })
+            .option('data-file', { type: 'string', describe: 'Read JSON payload from file' }),
           handler: wrap(async (argv, app) => {
-            const recordData = JSON.parse(argv.data);
+            const recordData = parseDataArg(argv);
             const record = await app.sdk.update(argv.table, argv['sys-id'], recordData);
             app.ok(record, { summary: `Updated record in ${argv.table}` });
           }),

@@ -438,3 +438,12 @@ MIT License - see LICENSE file for details
 ## Acknowledgments
 
 This project follows the architectural patterns from [basecamp-cli](https://github.com/basecamp/basecamp-cli).
+
+**Inspiration and references:**
+
+| Project | What we learned |
+|---------|----------------|
+| [Abey's `sn` CLI](https://github.com/abey79/servicenow-cli) (Rust) | Table API patterns, aggregate stats, raw REST passthrough |
+| [ServiceNow `now-sdk`](https://www.npmjs.com/package/@servicenow/sdk) | OAuth session flow using `angular.do?sysparm_type=get_user`, `X-UserToken` header for UI pages |
+| [ServiceNow VS Code Extension](https://marketplace.visualstudio.com/items?itemName=ServiceNow.now-vscode) | `sys.scripts.do` CSRF extraction pattern for background script execution |
+| [Getting Real](https://basecamp.com/gettingreal) by Basecamp | Build less, start with no, embrace constraints |

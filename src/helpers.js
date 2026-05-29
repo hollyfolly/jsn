@@ -1,5 +1,7 @@
 // Shared helper utilities
 
+import fs from 'node:fs';
+
 export function getStringField(record, field) {
   if (!record || typeof record !== 'object') return '';
   const val = record[field];
@@ -57,4 +59,25 @@ export function extractProfileName(instanceURL) {
 
 export function buildQuerySuffix(query) {
   return query ? ` --query "${query}"` : '';
+}
+
+/**
+ * Parse --data or --data-file into a JSON object.
+ * If --data-file is given, reads the file. Otherwise parses --data directly.
+ * Throws if neither is provided or JSON is invalid.
+ */
+export function parseDataArg(argv) {
+  let raw;
+  if (argv['data-file']) {
+    raw = fs.readFileSync(argv['data-file'], 'utf-8');
+  } else if (argv.data) {
+    raw = argv.data;
+  } else {
+    throw new Error('--data or --data-file is required');
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Invalid JSON: ${e.message}\n\nHint: On Windows PowerShell, use --data-file instead of --data to avoid quote mangling.\nRaw value: ${raw.substring(0, 200)}`);
+  }
 }

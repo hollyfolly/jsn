@@ -1,6 +1,6 @@
 // Generic dev subcommand builder for table-based CRUD
 
-import { formatRecordForDisplay, getStringField, isHexString } from '../../helpers.js';
+import { formatRecordForDisplay, getStringField, isHexString, parseDataArg } from '../../helpers.js';
 import { getCurrentUser, getCurrentApplication } from '../../context.js';
 import readline from 'node:readline';
 import { select } from '@inquirer/prompts';
@@ -221,9 +221,11 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
         .command({
           command: 'create',
           describe: `Create a new ${singular}`,
-          builder: (y) => y.option('data', { type: 'string', demandOption: true, describe: 'JSON fields (e.g. \'{"state":"2"}\')' }),
+          builder: (y) => y
+            .option('data', { type: 'string', describe: 'JSON fields (e.g. \'{"state":"2"}\')' })
+            .option('data-file', { type: 'string', describe: 'Read JSON payload from file' }),
           handler: wrap(async (argv, app) => {
-            const recordData = JSON.parse(argv.data);
+            const recordData = parseDataArg(argv);
             const record = await app.sdk.create(table, recordData);
             app.ok(record, {
               summary: `Created ${singular}`,
@@ -236,7 +238,9 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
         .command({
           command: 'update <identifier>',
           describe: `Update ${vowelArticle(singular)} ${singular}`,
-          builder: (y) => y.option('data', { type: 'string', demandOption: true, describe: 'JSON fields (e.g. \'{"state":"2"}\')' }),
+          builder: (y) => y
+            .option('data', { type: 'string', describe: 'JSON fields (e.g. \'{"state":"2"}\')' })
+            .option('data-file', { type: 'string', describe: 'Read JSON payload from file' }),
           handler: wrap(async (argv, app) => {
             const id = argv.identifier;
             const queryField = isHexString(id) && id.length === 32 ? 'sys_id' : 'name';
@@ -257,7 +261,7 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
               }
             }
 
-            const recordData = JSON.parse(argv.data);
+            const recordData = parseDataArg(argv);
             const updated = await app.sdk.update(table, sysID, recordData);
             app.ok(updated, { summary: `Updated ${singular} ${id}` });
           }),
