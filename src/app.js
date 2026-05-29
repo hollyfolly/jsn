@@ -109,7 +109,7 @@ export class App {
 
     const scopeFormatted = `[${scope}]`;
 
-    process.stderr.write('# Use `jsn updateset use` or `jsn scope use` to change scope/updateset\n');
+    process.stderr.write('# Use `jsn dev scopes` to change scope, `jsn dev updatesets set` to change updateset\n');
     process.stderr.write('PROFILE   USER      [SCOPE]           UPDATE SET\n');
 
     const profileStr = `]8;;${instanceLink}\x07${String(this.context.profileName).padEnd(9)}]8;;\x07`;

@@ -84,7 +84,7 @@ export const cli = yargs(hideBin(process.argv))
     type: 'boolean',
     global: true,
   })
-  .middleware((argv) => {
+  .middleware(async (argv) => {
     // Determine format from flags
     let format = 'auto';
     if (argv.json) format = 'json';
@@ -114,9 +114,9 @@ export const cli = yargs(hideBin(process.argv))
       }
     }
 
-    // Print context header for interactive terminals
+    // Print context header for interactive terminals (at the TOP, before command output)
     if (!['help', 'version', 'completion'].includes(cmd)) {
-      argv.app.printContextHeader();
+      await argv.app.printContextHeader();
     }
   })
   .command(setupCmd(wrap))
