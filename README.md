@@ -2,148 +2,82 @@
 
 A command-line interface for ServiceNow that follows the Unix philosophy: simple, composable, and scriptable.
 
-## Versions
-
-| Version | Language | Branch | Install | Status |
-|---------|----------|--------|---------|--------|
-| Go | Go | `main` | Binary / `go install` | Stable |
-| Node.js | JavaScript (Node 18+) | `nodejs` | `npm install -g` | Active development |
-
-Both versions share the same CLI interface and are tested against the same ServiceNow PDI.
-
 ## Installation
 
-### npm (Node.js version — cross-platform)
+### npm (recommended — cross-platform)
 
 ```bash
-npm install -g @jacebenson/jsn@node
+npm install -g @jacebenson/jsn
 ```
 
-> **Note:** The `@node` dist-tag is required. The `latest` tag currently points to the Go shim wrapper (v1.0.1).
+Works on macOS, Linux, and Windows with **Node.js 18+**. No compilation needed.
 
-No compilation needed. Works on macOS, Linux, and Windows with Node.js 18+.
-
-### Download Binary (Go version)
+Verify the installation:
 
 ```bash
-# Download the latest release
-curl -L https://github.com/jacebenson/jsn/releases/latest/download/jsn-linux-amd64 -o jsn
-chmod +x jsn
-sudo mv jsn /usr/local/bin/
+jsn --version
+jsn --help
 ```
 
-### Go Install (Go version)
+### Quick Start
 
 ```bash
-go install github.com/jacebenson/jsn/cmd/jsn@latest
-```
-
-## Quick Start
-
-### 1. Setup
-
-Run the interactive setup to configure your first ServiceNow instance:
-
-```bash
+# 1. Set up your first ServiceNow instance
 jsn setup
-```
 
-This will:
-1. Ask for your ServiceNow instance URL
-2. Open a browser for OAuth authentication
-3. Set the instance as your default
-
-### 2. Verify Authentication
-
-```bash
+# 2. Verify authentication
 jsn auth status
-```
 
-### 3. Start Using
-
-```bash
-# List all incidents
+# 3. Start using it
 jsn incidents
-
-# Show a specific incident
-jsn incidents INC0010001
-
-# Create a new incident
-jsn incidents create --description "Server down" --priority 1
-
-# List change requests
 jsn changes
-
-# Query any table
-jsn records list --table incident --query "priority=1^active=true"
+jsn requests
 ```
 
-## Configuration
-
-JSN uses a layered configuration system:
-
-| Source | Priority | Description |
-|--------|----------|-------------|
-| Flags | Highest | `--instance`, `--profile`, `--format` |
-| Environment | High | `SERVICENOW_INSTANCE_URL`, `SERVICENOW_FORMAT` |
-| Local config | Medium | `./.servicenow/config.json` |
-| Global config | Low | `~/.config/servicenow/config.json` |
-| Defaults | Lowest | Built-in defaults |
-
-### Profiles
-
-Work with multiple ServiceNow instances using profiles:
-
-```bash
-# Login to a new instance
-jsn auth login https://dev12345.service-now.com
-
-# List all profiles
-jsn profiles list
-
-# Switch to a different profile
-jsn profiles use dev12345
-
-# Show current profile
-jsn profiles show
-```
+That's it. No config files to write, no binaries to download.
 
 ## Commands
 
-### Work Commands (Day-to-day operations)
+### Core
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
 | `incidents` | `incident`, `inc` | Manage IT incidents |
 | `changes` | `change`, `chg` | Manage change requests |
-| `requests` | `request`, `req`, `ritm` | Manage service catalog requests |
+| `requests` | `request`, `req` | Manage service catalog requests |
 | `tasks` | `task`, `sctask` | Manage service catalog tasks |
-| `users` | `user` | Manage users |
-| `groups` | `group` | Manage user groups |
-| `records` | - | Generic Table API access |
+| `tickets` | `ticket` | Query generic tickets |
 
-### Dev Commands (Development artifacts)
+### Data & Admin
 
-| Category | Command | Description |
-|----------|---------|-------------|
-| **Automations** | `dev flows` | Manage Flow Designer flows |
-| | `dev actions` | Manage action definitions |
-| **Scripts** | `dev includes` | Manage script includes |
-| | `dev rules` | Manage business rules |
-| | `dev clientscripts` | Manage client scripts |
-| | `dev uiactions` | Manage UI actions |
-| | `dev uipolicies` | Manage UI policies |
-| **Data** | `dev tables` | View table definitions |
-| | `dev columns` | Manage column definitions |
-| | `dev import` | Manage import sets |
-| **Security** | `dev acls` | Manage access controls |
-| | `dev roles` | Manage roles |
-| **Platform** | `dev updatesets` | Manage update sets |
-| | `dev scopes` | Manage application scopes |
-| | `dev properties` | Manage system properties |
-| | `dev logs` | Query system logs |
-| | `dev rest` | Raw REST API calls |
-| | `dev eval` | Execute background scripts |
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `records` | — | Generic Table API for any table |
+| `users` | `user` | Manage ServiceNow users |
+| `groups` | `group` | Manage groups |
+| `groupmembers` | `gm` | Manage group memberships |
+| `grouproles` | `gr` | Manage group roles |
+
+### Development
+
+| Command | Description |
+|---------|-------------|
+| `dev` | Manage development artifacts (flows, includes, rules, ACLs, scopes, etc.) |
+
+### Configuration
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `setup` | — | Interactive first-time setup |
+| `auth` | — | Manage OAuth authentication |
+| `profiles` | `profile` | Manage instance profiles |
+
+### Utility
+
+| Command | Description |
+|---------|-------------|
+| `skill` | Manage the AI agent skill file (show, fetch, install) |
+| `version` | Show version; use `--check` to check npm for updates |
 
 ## Usage Examples
 
@@ -175,81 +109,45 @@ jsn incidents delete INC0010001
 # List all change requests
 jsn changes
 
-# List high-risk changes
-jsn changes list --query "risk=high"
-
 # Create change request
 jsn changes create --description "Deploy feature" --risk medium
 
 # Update change
 jsn changes update CHG0010001 --data '{"state": "3"}'
-
-# Delete change
-jsn changes delete CHG0010001
 ```
 
-### Development Artifacts
+### Requests (Catalog Items)
 
 ```bash
-# AUTOMATIONS
-# List Flow Designer flows
-jsn dev flows
+# List service catalog requests
+jsn requests
 
-# List action definitions
-jsn dev actions
+# Show with attachments and catalog variables
+jsn requests show RITM0010001
+```
 
-# SCRIPTS
-# List script includes
-jsn dev includes
+The `requests show` command enriches the record with attachments and catalog variables automatically.
 
-# Get a specific script include
-jsn dev includes MyScriptInclude
+### Users & Groups
 
-# List business rules
-jsn dev rules
+```bash
+# Search users
+jsn users "John Smith"
 
-# List client scripts
-jsn dev clientscripts
+# Create a user
+jsn users create --user-name john.smith --name "John Smith" --email john@example.com
 
-# List UI actions
-jsn dev uiactions
+# Delete a user
+jsn users delete john.smith
 
-# List UI policies
-jsn dev uipolicies
+# List groups
+jsn groups
 
-# DATA
-# View table definition
-jsn dev tables incident
+# Create a group
+jsn groups create --name "Engineering" --description "Engineering team"
 
-# List table columns
-jsn dev columns --table incident
-
-# SECURITY
-# List access controls (ACLs)
-jsn dev acls
-
-# List roles
-jsn dev roles
-
-# PLATFORM
-# List update sets
-jsn dev updatesets
-
-# Set current update set
-jsn dev updatesets set "My Update Set"
-
-# List application scopes
-jsn dev scopes
-
-# Query system properties
-jsn dev properties
-
-# Query system logs
-jsn dev logs --level error
-jsn dev logs --source "Business Rule" --level warn
-
-# Execute background script
-jsn dev eval "gs.info('Hello World')"
+# Add a user to a group
+jsn groupmembers add --user john.smith --group "Engineering"
 ```
 
 ### Generic Table API
@@ -261,25 +159,100 @@ jsn records list --table incident --limit 10
 # Query with encoded query
 jsn records list --table incident --query "priority=1^active=true"
 
-# Show specific columns
-jsn records list --table incident --columns "number,short_description,priority"
-
 # Get a record by sys_id
 jsn records get --table incident --sys-id abc123
 
 # Create a record
 jsn records create --table incident --data '{"short_description": "Test"}'
+```
 
-# Update a record
-jsn records update --table incident --sys-id abc123 --data '{"priority": "1"}'
+### Development Artifacts
 
-# Delete a record
-jsn records delete --table incident --sys-id abc123
+```bash
+# Automations
+jsn dev flows               # List Flow Designer flows
+jsn dev actions             # List action definitions
+
+# Scripts
+jsn dev includes            # List script includes
+jsn dev rules               # List business rules
+jsn dev clientscripts       # List client scripts
+jsn dev uiactions           # List UI actions
+jsn dev uipolicies          # List UI policies
+
+# Security
+jsn dev acls                # List access controls
+jsn dev roles               # List roles
+
+# Platform
+jsn dev updatesets          # List update sets
+jsn dev scopes              # List application scopes
+jsn dev properties          # List system properties
+jsn dev logs                # Query system logs
+jsn dev eval                # Execute background scripts
+
+# Data
+jsn dev tables incident     # View table definition
+jsn dev columns --table incident  # List columns
+```
+
+## AI Agent Support
+
+jsn ships with a skill file for AI agent compatibility (Hermes, Claude Code, Cursor, OpenCode, etc.):
+
+```bash
+# Show the bundled skill file
+jsn skill show
+
+# Download the latest from GitHub
+jsn skill fetch
+
+# Download and install to the Hermes skills directory
+jsn skill install
+
+# View all skill-related file paths
+jsn skill path
+```
+
+This skill file teaches AI agents how to use jsn safely and effectively.
+
+## Checking for Updates
+
+```bash
+jsn version --check
+```
+
+If a newer version is available, you'll see:
+
+```
+jsn 0.1.0 — newer version 0.2.0 available
+  → update: npm install -g @jacebenson/jsn
+```
+
+## Configuration
+
+JSN uses a layered configuration system:
+
+| Source | Priority | Description |
+|--------|----------|-------------|
+| Flags | Highest | `--instance`, `--profile`, `--format` |
+| Environment | High | `SERVICENOW_INSTANCE_URL`, `SERVICENOW_FORMAT` |
+| Local config | Medium | `./.servicenow/config.json` |
+| Global config | Low | `~/.config/servicenow/config.json` |
+| Defaults | Lowest | Built-in defaults |
+
+### Profiles
+
+Work with multiple ServiceNow instances:
+
+```bash
+jsn auth login https://dev12345.service-now.com    # Login and auto-create profile
+jsn profiles list                                   # List all profiles
+jsn profiles use dev12345                           # Switch profile
+jsn profiles show                                   # Show current profile
 ```
 
 ## Output Formats
-
-JSN supports multiple output formats:
 
 | Format | Flag | Description |
 |--------|------|-------------|
@@ -290,17 +263,10 @@ JSN supports multiple output formats:
 | Quiet | `--quiet` or `-q` | Data only, no envelope |
 
 ```bash
-# JSON output
-jsn incidents --json
-
-# Styled table output
-jsn incidents --styled
-
-# Markdown output for documentation
-jsn incidents --markdown
-
-# Quiet mode for piping
-jsn incidents -q | jq '.[].number'
+jsn incidents --json        # JSON output
+jsn incidents --styled      # Styled table output
+jsn incidents --markdown    # Markdown tables
+jsn incidents -q | jq '.'   # Quiet mode for piping
 ```
 
 ## Authentication
@@ -308,17 +274,23 @@ jsn incidents -q | jq '.[].number'
 JSN uses OAuth 2.0 with PKCE for secure authentication:
 
 ```bash
-# Login to an instance
-jsn auth login https://dev12345.service-now.com
-
-# Check authentication status
-jsn auth status
-
-# Logout
-jsn auth logout
+jsn auth login https://dev12345.service-now.com     # Interactive browser login
+jsn auth status                                      # Check authentication
+jsn auth refresh                                     # Refresh token
+jsn auth logout                                      # Logout
 ```
 
-Credentials are stored in `~/.config/servicenow/credentials/` (file-based, OS keychain coming soon).
+Credentials are stored in `~/.config/servicenow/credentials/` (file-based, with OS keyring support).
+
+For CI/CD and bot environments, use the `--code` and `--print-url` flags:
+
+```bash
+# Generate auth URL manually (no browser auto-open)
+jsn auth login https://dev.service-now.com --print-url
+
+# Complete auth with authorization code
+jsn auth login https://dev.service-now.com --code "eyJ..."
+```
 
 ## Environment Variables
 
@@ -326,114 +298,101 @@ Credentials are stored in `~/.config/servicenow/credentials/` (file-based, OS ke
 |----------|-------------|
 | `SERVICENOW_INSTANCE_URL` | Default instance URL |
 | `SERVICENOW_FORMAT` | Default output format |
+| `SERVICENOW_OAUTH_CLIENT_ID` | Custom OAuth client ID |
 | `SERVICENOW_OAUTH_TOKEN` | OAuth token (for CI/CD) |
 
 ## CI/CD Integration
 
-For automated environments, use the OAuth token:
-
 ```bash
 export SERVICENOW_INSTANCE_URL="https://dev12345.service-now.com"
-export SERVICENOW_OAUTH_TOKEN="your-oauth-token"
+export SERVICENOW_OAUTH_TOKEN="***"
 
 # Now run commands without interactive auth
 jsn incidents list
 ```
 
-## Shell Completion
-
-> **Note:** Shell completion is available in the Go version only.
+## Getting Help
 
 ```bash
-# Bash
+jsn --help                    # Grouped command list
+jsn <command> --help          # Command-specific help with flags
+jsn <command> list --help     # Subcommand options
+```
+
+## Shell Completion
+
+Shell completion is available. To install:
+
+```bash
+# Bash — add to your .bashrc
 source <(jsn completion bash)
 
-# Zsh
+# Zsh — add to your .zshrc
 source <(jsn completion zsh)
 
 # Fish
 jsn completion fish | source
 ```
 
-## Getting Help
-
-```bash
-# General help
-jsn --help
-
-# Command help
-jsn incidents --help
-
-# Subcommand help
-jsn incidents create --help
-```
-
-## Troubleshooting
-
-### Not authenticated
-
-```bash
-⚠️  Not authenticated to https://dev12345.service-now.com
-
-To get started, run:
-  jsn setup           # Interactive setup
-  jsn auth login      # Login to instance
-```
-
-**Solution**: Run `jsn setup` or `jsn auth login <instance>`
-
-### Instance URL required
-
-```bash
-Error (usage): Instance URL required. Set via --instance flag, SERVICENOW_INSTANCE_URL env, or config file.
-```
-
-**Solution**: Set the instance with one of:
-- `jsn setup`
-- `jsn auth login <instance>`
-- `--instance` flag
-- `SERVICENOW_INSTANCE_URL` environment variable
-
 ## Development
 
-This repository maintains two parallel implementations:
-
-- **`main`** — Go implementation (stable)
-- **`nodejs`** — Node.js implementation (active development)
-
-Both branches share the same CLI interface and are kept in sync for feature parity.
-
-### Node.js version
+### Setup
 
 ```bash
+git clone https://github.com/jacebenson/jsn
+cd jsn
 git checkout nodejs
 npm install
-npm test        # Run tests
-npm run lint    # Run ESLint
-npm run start   # Run CLI locally
+npm test           # Run tests (128+ tests)
+npm run lint       # Run ESLint
+npm start -- --help  # Test locally
 ```
 
 ### Releasing
 
 ```bash
-# From nodejs branch — creates node-v* tag and publishes to npm
-npm run release -- patch
+# Publish to npm
+npm run release -- patch    # patch bump
+npm run release -- minor    # minor bump
+npm run release -- major    # major bump
+```
 
-# From main branch — creates go-v* tag and builds binaries
-npm run release -- patch
+The Release GitHub Action will automatically build, tag, and publish to npm on push.
+
+## Previous Versions (Go)
+
+jsn was originally written in Go. The Node.js version on the `nodejs` branch is now at full feature parity. The Go version lives on the `main` branch and is considered stable but no longer active.
+
+| Version | Language | Branch | Install | Status |
+|---------|----------|--------|---------|--------|
+| Node.js | JavaScript (Node 18+) | `nodejs` | `npm install -g @jacebenson/jsn` | ✅ Active |
+| Go | Go | `main` | Binary download | ⏸️ Stable (legacy) |
+
+To install the Go version (legacy):
+
+```bash
+curl -L https://github.com/jacebenson/jsn/releases/latest/download/jsn-linux-amd64 -o jsn
+chmod +x jsn && sudo mv jsn /usr/local/bin/
 ```
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch (target the appropriate branch: `main` or `nodejs`)
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+2. Create a feature branch (target `nodejs` for new features, `main` for Go fixes)
+3. Make your changes with tests
+4. Submit a pull request
+
+Development commands:
+
+```bash
+npm test       # Node.js test suite (128+ tests)
+npm run lint   # ESLint
+npm start      # Run locally
+```
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
