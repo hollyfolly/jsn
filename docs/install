@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # JSN CLI Installer
-# Installs the latest JSN release from GitHub
+#
+# ╔══════════════════════════════════════════════════╗
+# ║  RECOMMENDED: Install via npm instead            ║
+# ║                                                  ║
+# ║  npm install -g @jacebenson/jsn                   ║
+# ║                                                  ║
+# ║  Faster, cross-platform, no compilation needed.  ║
+# ║  Use this script only if you don't have Node.js  ║
+# ╚══════════════════════════════════════════════════╝
+#
+# Installs the JSN CLI from GitHub releases.
+# This script downloads a pre-built binary — no npm or Node.js required.
 #
 # Usage:
 #   curl -fsSL https://jsn.jace.pro/install | bash
