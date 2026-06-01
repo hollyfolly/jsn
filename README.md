@@ -32,7 +32,7 @@ jsn version --check
 
 ## What's New in v0.1.0
 
-Full feature parity with the original Go implementation — 128 tests, lint clean:
+Full feature parity — 128 tests, lint clean:
 
 | Feature | Status |
 |---------|--------|
@@ -44,7 +44,7 @@ Full feature parity with the original Go implementation — 128 tests, lint clea
 | Group management (CRUD) | ✅ |
 | Group memberships and roles | ✅ |
 | Generic Table API (`jsn records`) | ✅ |
-| OAuth PKCE with keychain (Go-compatible auth store) | ✅ |
+| OAuth PKCE with keychain (shared auth store) | ✅ |
 | Bot/CI/CD auth flags (`--code`, `--print-url`) | ✅ |
 | Dev commands: flows, actions, includes, rules, ACLs, etc. | ✅ |
 | Script execution (`jsn dev eval`) via OAuth session flow | ✅ |
@@ -211,7 +211,7 @@ jsn incidents -q | jq '.[].number'
 
 ## Authentication
 
-OAuth 2.0 with PKCE. Credentials stored in `~/.config/servicenow/credentials/` — shared with the legacy Go version.
+OAuth 2.0 with PKCE. Credentials stored in `~/.config/servicenow/credentials/`.
 
 ```bash
 jsn auth login https://dev12345.service-now.com
@@ -334,10 +334,6 @@ jsn version --check
 # → jsn 0.0.10 — newer version 0.1.0 available
 npm install -g @jacebenson/jsn
 ```
-
-## Historical Note
-
-JSN was originally implemented in Go (on the `main` branch) and migrated to Node.js for broader cross-platform support and simpler installation. As of v0.1.0, the Node.js version has full feature parity. The Go source remains available on the `main` branch for reference.
 
 ## License
 

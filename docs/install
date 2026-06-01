@@ -10,7 +10,7 @@
 # ║  Use this script only if you don't have Node.js  ║
 # ╚══════════════════════════════════════════════════╝
 #
-# Installs the JSN CLI (Go binary) from GitHub releases.
+# Installs the JSN CLI from GitHub releases.
 # This script downloads a pre-built binary — no npm or Node.js required.
 #
 # Usage:
