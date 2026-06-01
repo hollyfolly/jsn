@@ -3,7 +3,6 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execSync } from 'node:child_process';
 import { normalizeInstanceURL } from '../src/config.js';
 
 // ─── Config tests ───
@@ -92,7 +91,7 @@ describe('SDK Architecture', () => {
     const { SDKClient } = await import('../src/sdk.js');
 
     // Core CRUD methods — must be present
-    const coreMethods = ['list', 'get', 'create', 'update', 'delete', 'request', 'rawRequest', 'aggregateCount', 'executeScript'];
+    const coreMethods = ['list', 'get', 'create', 'update', 'delete', 'request', 'rawRequest', 'aggregateCount', 'executeScript', 'getCurrentUser'];
     for (const method of coreMethods) {
       assert.strictEqual(typeof SDKClient.prototype[method], 'function', `SDKClient must have method: ${method}`);
     }

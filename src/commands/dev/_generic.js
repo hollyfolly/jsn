@@ -321,7 +321,7 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
     aliases: aliases || [],
     describe: `Manage ${name} (e.g. "${name} list --query nameLIKEincident")`,
     builder,
-    handler: (argv) => {
+    handler: (_argv) => {
       // This handler only runs when no subcommand is matched (the default case).
       // Show help for the subcommands available.
       console.log(`Manage ${name} from the ${table} table.`);

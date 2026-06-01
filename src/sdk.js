@@ -165,6 +165,22 @@ export class SDKClient {
     await this.request(endpoint, { method: 'DELETE' });
   }
 
+  async getCurrentUser() {
+    const params = new URLSearchParams();
+    params.set('sysparm_query', 'user_name=javascript:gs.getUserName()');
+    params.set('sysparm_limit', '1');
+    params.set('sysparm_display_value', 'all');
+    params.set('sysparm_fields', 'sys_id,user_name,name');
+    const records = await this.list('sys_user', params);
+    if (records.length === 0) return null;
+    const r = records[0];
+    return {
+      sys_id: r.sys_id?.value || r.sys_id,
+      user_name: r.user_name?.display_value || r.user_name,
+      name: r.name?.display_value || r.name,
+    };
+  }
+
   async inspectFlow(identifier) {
     const isSysID = identifier.length === 32 && /^[0-9a-fA-F]+$/.test(identifier);
 
