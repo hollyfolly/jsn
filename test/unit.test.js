@@ -3,7 +3,6 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execSync } from 'node:child_process';
 import { normalizeInstanceURL } from '../src/config.js';
 
 // ─── Config tests ───
