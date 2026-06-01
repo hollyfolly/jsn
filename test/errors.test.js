@@ -3,7 +3,7 @@ import assert from 'node:assert';
 
 describe('AppError', () => {
   it('creates structured errors with all properties', async () => {
-    const { AppError, CodeUsage, CodeAuth, CodeNotFound, CodeAPI, CodeNetwork, CodeForbidden, CodeRateLimit } = await import('../src/errors.js');
+    const { AppError, CodeUsage } = await import('../src/errors.js');
     const e = new AppError(CodeUsage, 'test message', 'test hint', 400);
     assert.strictEqual(e.name, 'AppError');
     assert.strictEqual(e.code, 'usage_error');
