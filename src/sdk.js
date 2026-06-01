@@ -165,6 +165,22 @@ export class SDKClient {
     await this.request(endpoint, { method: 'DELETE' });
   }
 
+  async getCurrentUser() {
+    const params = new URLSearchParams();
+    params.set('sysparm_query', 'user_name=javascript:gs.getUserName()');
+    params.set('sysparm_limit', '1');
+    params.set('sysparm_display_value', 'all');
+    params.set('sysparm_fields', 'sys_id,user_name,name');
+    const records = await this.list('sys_user', params);
+    if (records.length === 0) return null;
+    const r = records[0];
+    return {
+      sys_id: r.sys_id?.value || r.sys_id,
+      user_name: r.user_name?.display_value || r.user_name,
+      name: r.name?.display_value || r.name,
+    };
+  }
+
   async inspectFlow(identifier) {
     const isSysID = identifier.length === 32 && /^[0-9a-fA-F]+$/.test(identifier);
 
@@ -378,6 +394,85 @@ export class SDKClient {
     });
 
     return this._extractScriptOutput(html);
+  }
+
+  /**
+   * Fetch a record and related data from multiple tables.
+   * @param {string} table - Table to query
+   * @param {URLSearchParams} params - Query params for the main record
+   * @param {Array<{table: string, queryField: string, queryValue: string, fields: string[], displayAs: string}>} related - Related tables to fetch
+   * @returns {Promise<{_record: object, [key: string]: any}>}
+   */
+  async recordWithRelated(table, params, related) {
+    const records = await this.list(table, params);
+    if (records.length === 0) throw new Error('Record not found');
+
+    const result = { _record: records[0] };
+
+    for (const rel of related) {
+      try {
+        const relParams = new URLSearchParams();
+        relParams.set('sysparm_display_value', 'all');
+        relParams.set('sysparm_fields', (rel.fields || []).join(','));
+        relParams.set('sysparm_query', `${rel.queryField}=${rel.queryValue}`);
+        relParams.set('sysparm_limit', '100');
+        result[rel.displayAs] = await this.list(rel.table, relParams);
+      } catch {
+        result[rel.displayAs] = [];
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Fetch attachments for a record.
+   * @param {string} tableName - Table name (e.g. sc_req_item)
+   * @param {string} tableSysID - Sys ID of the record
+   * @returns {Promise<Array>}
+   */
+  async fetchAttachments(tableName, tableSysID) {
+    const params = new URLSearchParams();
+    params.set('sysparm_display_value', 'all');
+    params.set('sysparm_fields', 'sys_id,file_name,sys_created_on,sys_created_by');
+    params.set('sysparm_query', `table_name=${tableName}^table_sys_id=${tableSysID}`);
+    return this.list('sys_attachment', params);
+  }
+
+  /**
+   * Fetch catalog variables for a request item (RITM).
+   * @param {string} ritmSysID - Sys ID of the request item
+   * @returns {Promise<Array<{question: string, value: string}>>}
+   */
+  async fetchCatalogVariables(ritmSysID) {
+    const params = new URLSearchParams();
+    params.set('sysparm_display_value', 'all');
+    params.set('sysparm_fields', 'item_option_new,value');
+    params.set('sysparm_query', `request_item=${ritmSysID}`);
+    params.set('sysparm_limit', '100');
+
+    const optRecords = await this.list('sc_item_option', params);
+    const variables = [];
+
+    for (const opt of optRecords) {
+      let question = '';
+      if (opt.item_option_new && typeof opt.item_option_new === 'object') {
+        question = opt.item_option_new.display_value || '';
+      }
+
+      let value = '';
+      if (opt.value && typeof opt.value === 'object') {
+        value = opt.value.display_value || opt.value.value || '';
+      } else if (typeof opt.value === 'string') {
+        value = opt.value;
+      }
+
+      if (question) {
+        variables.push({ question, value });
+      }
+    }
+
+    return variables;
   }
 
   async _warmSession() {

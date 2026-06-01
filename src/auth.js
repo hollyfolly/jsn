@@ -10,6 +10,37 @@ import { execSync } from 'node:child_process';
 import { globalConfigDir, normalizeInstanceURL } from './config.js';
 import { errAuth } from './errors.js';
 
+// ─── PKCE state persistence (shared with Go version) ───
+
+function pkceStatePath(instance) {
+  const dir = path.join(globalConfigDir(), 'pkce');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const filename = instance.replace(/:\/\//g, '_').replace(/\//g, '_').replace(/:/g, '_') + '.json';
+  return path.join(dir, filename);
+}
+
+function savePKCEState(instance, pkce) {
+  const filePath = pkceStatePath(instance);
+  fs.writeFileSync(filePath, JSON.stringify(pkce, null, 2), { mode: 0o600 });
+}
+
+function loadPKCEState(instance) {
+  try {
+    const data = fs.readFileSync(pkceStatePath(instance), 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+function removePKCEState(instance) {
+  try {
+    fs.unlinkSync(pkceStatePath(instance));
+  } catch {
+    // ignore
+  }
+}
+
 const DEFAULT_OAUTH_CLIENT_ID = '543e5655f77746a28228c6009a599dfb';
 const REDIRECT_URI = '/sdk-oauth.do';
 
@@ -46,6 +77,7 @@ function buildAuthURL(instanceURL, clientID, pkce) {
   u.searchParams.set('code_challenge', pkce.code_challenge);
   u.searchParams.set('code_challenge_method', 'S256');
   u.searchParams.set('scope', 'openid');
+  u.searchParams.set('approval_prompt', 'force');
   return u.toString();
 }
 
@@ -273,6 +305,43 @@ export class AuthManager {
     }
 
     console.log('\nExchanging authorization code for tokens...');
+    const newCreds = await this.exchangeCode(instanceURL, clientID, code, pkce);
+    saveCredentials(instanceURL, newCreds);
+    return newCreds;
+  }
+
+  /**
+   * Build an OAuth authorization URL and persist PKCE state for later use.
+   * After calling this, the user can visit the URL in a browser and then
+   * call loginWithCode() with the resulting authorization code.
+   */
+  buildAuthURL(instanceURL) {
+    instanceURL = normalizeInstanceURL(instanceURL);
+    const clientID = getOAuthClientID();
+    const pkce = generatePKCE();
+    savePKCEState(instanceURL, pkce);
+    return buildAuthURL(instanceURL, clientID, pkce);
+  }
+
+  /**
+   * Complete login using an authorization code obtained from a prior buildAuthURL() call.
+   * The PKCE state must have been saved by an earlier buildAuthURL() call.
+   */
+  async loginWithCode(instanceURL, code) {
+    instanceURL = normalizeInstanceURL(instanceURL);
+    const clientID = getOAuthClientID();
+    const pkce = loadPKCEState(instanceURL);
+    if (!pkce) {
+      throw errAuth(
+        `No pending login session for ${instanceURL}.\n\n` +
+        'Run without --code first to generate one:\n' +
+        `  jsn auth login ${instanceURL} --print-url\n\n` +
+        'This generates the PKCE challenge and saves it. Then call:\n' +
+        `  jsn auth login ${instanceURL} --code CODE`
+      );
+    }
+    removePKCEState(instanceURL);
+
     const newCreds = await this.exchangeCode(instanceURL, clientID, code, pkce);
     saveCredentials(instanceURL, newCreds);
     return newCreds;

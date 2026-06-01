@@ -139,6 +139,6 @@ export function parseDataArg(argv) {
   try {
     return JSON.parse(raw);
   } catch (e) {
-    throw new Error(`Invalid JSON: ${e.message}\n\nHint: On Windows PowerShell, use --data-file instead of --data to avoid quote mangling.\nRaw value: ${raw.substring(0, 200)}`);
+    throw new Error(`Invalid JSON: ${e.message}\n\nHint: On Windows PowerShell, use --data-file instead of --data to avoid quote mangling.\nRaw value: ${raw.substring(0, 200)}`, { cause: e });
   }
 }
