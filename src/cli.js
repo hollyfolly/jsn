@@ -5,6 +5,7 @@ import { hideBin } from 'yargs/helpers';
 import process from 'node:process';
 import { loadConfig, getEffectiveInstance } from './config.js';
 import { App } from './app.js';
+import { renderHelp } from './help.js';
 
 // Command modules
 import { setupCmd } from './commands/setup.js';
@@ -139,6 +140,13 @@ export const cli = yargs(hideBin(process.argv))
   .version(false)
   .strictCommands()
   .strictOptions(false)
-  .epilogue('TIPS\n'
-    + '  --query is available on every list command (e.g. "incidents list --query priority=1")\n'
-    + '  Use "jsn <command> --help" for details, or "jsn <command> list --help" for list options');
+  .fail((msg, err) => {
+    if (err) throw err;
+    // No command given → show custom grouped help instead of yargs error
+    if (msg === 'You must specify a command') {
+      process.stdout.write(renderHelp());
+      process.exit(0);
+    }
+    process.stderr.write(`Error: ${msg}\n`);
+    process.exit(1);
+  });
