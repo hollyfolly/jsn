@@ -77,6 +77,7 @@ function buildAuthURL(instanceURL, clientID, pkce) {
   u.searchParams.set('code_challenge', pkce.code_challenge);
   u.searchParams.set('code_challenge_method', 'S256');
   u.searchParams.set('scope', 'openid');
+  u.searchParams.set('approval_prompt', 'force');
   return u.toString();
 }
 
