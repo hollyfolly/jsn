@@ -1,10 +1,12 @@
-import { describe, it } from 'node:test';
+// Clean up any env variable that might interfere
+delete process.env.SERVICENOW_OAUTH_TOKEN;
+
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert';
 import { cli } from '../src/cli.js';
 
 describe('CLI smoke tests', () => {
   it('should parse without error', () => {
-    // Just verify the CLI object exists and is a yargs instance
     assert.ok(cli, 'CLI should be defined');
     assert.ok(typeof cli.parse === 'function', 'CLI should have parse method');
   });
@@ -39,4 +41,35 @@ describe('Errors', () => {
     assert.strictEqual(authErr.code, 'auth_error');
     assert.ok(authErr.hint.includes('jsn auth login'));
   });
+});
+
+describe('Auth', () => {
+  it('returns false when no instance configured', async () => {
+    const { AuthManager } = await import('../src/auth.js');
+    const auth = new AuthManager({ getEffectiveInstance: () => '' });
+    assert.strictEqual(auth.isAuthenticated(), false);
+  });
+});
+
+describe('SDK Architecture', () => {
+  it('should not have domain-specific helper methods on Client', async () => {
+    const { SDKClient } = await import('../src/sdk.js');
+
+    const coreMethods = ['list', 'get', 'create', 'update', 'delete', 'request', 'rawRequest', 'aggregateCount', 'executeScript'];
+    for (const method of coreMethods) {
+      assert.strictEqual(typeof SDKClient.prototype[method], 'function', `SDKClient must have method: ${method}`);
+    }
+
+    const forbiddenPatterns = ['ListForm', 'ListList', 'GetSP', 'ListSP'];
+    const protoProps = Object.getOwnPropertyNames(SDKClient.prototype);
+    for (const prop of protoProps) {
+      for (const pattern of forbiddenPatterns) {
+        assert.ok(!prop.includes(pattern), `SDKClient should NOT have domain method: ${prop}`);
+      }
+    }
+  });
+});
+
+after(() => {
+  delete process.env.SERVICENOW_OAUTH_TOKEN;
 });
