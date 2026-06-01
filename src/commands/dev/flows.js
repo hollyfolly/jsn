@@ -65,6 +65,34 @@ export function flowsCmd(wrap) {
               ],
             });
           }),
+        })
+        .command({
+          command: 'create',
+          describe: 'Create a new flow (not yet implemented)',
+          builder: (y) => y
+            .option('data', { type: 'string', describe: 'JSON data for the flow' }),
+          handler: wrap(async (_argv, _app) => {
+            throw new Error('Flow creation requires the Flow Designer GraphQL API - not yet implemented.\n'
+              + 'Use the ServiceNow web UI to create flows, then use "jsn dev flows list" to view them.');
+          }),
+        })
+        .command({
+          command: 'update <identifier>',
+          describe: 'Update a flow (not yet implemented)',
+          builder: (y) => y
+            .option('data', { type: 'string', describe: 'JSON data to update' }),
+          handler: wrap(async (_argv, _app) => {
+            throw new Error('Flow updates require the Flow Designer GraphQL API - not yet implemented.\n'
+              + 'Use the ServiceNow web UI to update flows, then use "jsn dev flows list" to view them.');
+          }),
+        })
+        .command({
+          command: 'delete <identifier>',
+          describe: 'Delete a flow (not yet implemented)',
+          handler: wrap(async (_argv, _app) => {
+            throw new Error('Flow deletion requires the Flow Designer GraphQL API - not yet implemented.\n'
+              + 'Use the ServiceNow web UI to delete flows.');
+          }),
         });
     },
     handler: () => {},
