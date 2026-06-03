@@ -18,7 +18,7 @@ export function buildTicketCommands(table, displayName, alias, defaultColumns, s
           describe: `List ${table}`,
           builder: (y) => y
             .option('query', { type: 'string', describe: 'Encoded query (e.g. "nameLIKEincident" or "active=true")' })
-            .option('columns', { alias: 'c', type: 'string', describe: 'Comma-separated columns (e.g. "number,short_description")' })
+            .option('columns', { alias: ['c', 'fields'], type: 'string', describe: 'Comma-separated columns (e.g. "number,short_description")' })
             .option('limit', { alias: 'l', type: 'number', default: 20, describe: 'Max records' })
             .option('offset', { alias: 'o', type: 'number', default: 0, describe: 'Offset for pagination' }),
           handler: wrap(async (argv, app) => {

@@ -32,7 +32,7 @@ export function recordsCmd(wrap) {
             .option('table', { type: 'string', demandOption: true, describe: 'Table name' })
             .option('sys-id', { type: 'string', describe: 'Record sys_id (filters to a single record)' })
             .option('query', { type: 'string', describe: 'Encoded query (e.g. "nameLIKEincident" or "active=true")' })
-            .option('columns', { alias: 'c', type: 'string', describe: 'Comma-separated columns (e.g. "number,short_description")' })
+            .option('columns', { alias: ['c', 'fields'], type: 'string', describe: 'Comma-separated columns (e.g. "number,short_description")' })
             .option('limit', { type: 'number', default: 20, describe: 'Max records' })
             .option('offset', { type: 'number', default: 0, describe: 'Offset' }),
           handler: wrap(async (argv, app) => {
@@ -112,7 +112,7 @@ export function recordsCmd(wrap) {
           builder: (y) => y
             .option('table', { type: 'string', demandOption: true, describe: 'Table name' })
             .option('sys-id', { type: 'string', demandOption: true, describe: 'Record sys_id' })
-            .option('columns', { type: 'string', describe: 'Comma-separated columns (e.g. "number,short_description")' }),
+            .option('columns', { alias: ['c', 'fields'], type: 'string', describe: 'Comma-separated columns (e.g. "number,short_description")' }),
           handler: wrap(async (argv, app) => {
             const params = new URLSearchParams();
             params.set('sysparm_query', `sys_id=${argv['sys-id']}`);

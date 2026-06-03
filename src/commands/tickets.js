@@ -13,7 +13,7 @@ export function ticketsCmd(wrap) {
           describe: 'List tickets',
           builder: (y) => y
             .option('query', { type: 'string', describe: 'Encoded query (e.g. "active=true^priority=1")' })
-            .option('columns', { alias: 'c', type: 'string', describe: 'Comma-separated columns (e.g. "number,short_description,priority")' })
+            .option('columns', { alias: ['c', 'fields'], type: 'string', describe: 'Comma-separated columns (e.g. "number,short_description,priority")' })
             .option('limit', { alias: 'l', type: 'number', default: 20, describe: 'Max records' })
             .option('offset', { alias: 'o', type: 'number', default: 0, describe: 'Offset' }),
           handler: wrap(async (argv, app) => {

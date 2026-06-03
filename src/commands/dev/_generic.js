@@ -81,7 +81,7 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
         describe: `List ${name}`,
         builder: (y) => y
           .option('query', { type: 'string', describe: 'Encoded query (e.g. "nameLIKEincident" or "active=true^priority=1")' })
-          .option('columns', { alias: 'c', type: 'string', describe: 'Comma-separated columns (e.g. "name,label,super_class")' })
+          .option('columns', { alias: ['c', 'fields'], type: 'string', describe: 'Comma-separated columns (e.g. "name,label,super_class")' })
           .option('limit', { alias: 'l', type: 'number', default: 20, describe: 'Max records' }),
         handler: wrap(async (argv, app) => {
           const query = argv.query || '';
@@ -251,6 +251,7 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
             const findParams = new URLSearchParams();
             findParams.set('sysparm_query', `${queryField}=${id}`);
             findParams.set('sysparm_limit', '1');
+            findParams.set('sysparm_display_value', 'all');
             const records = await app.sdk.list(table, findParams);
             if (records.length === 0) {
               throw new Error(`${singular} not found: ${id}`);
@@ -280,6 +281,7 @@ export function buildDevCmd(name, table, aliases, defaultColumns, wrap, opts = {
             const findParams = new URLSearchParams();
             findParams.set('sysparm_query', `${queryField}=${id}`);
             findParams.set('sysparm_limit', '1');
+            findParams.set('sysparm_display_value', 'all');
             const records = await app.sdk.list(table, findParams);
             if (records.length === 0) {
               throw new Error(`${singular} not found: ${id}`);
