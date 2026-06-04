@@ -1,0 +1,157 @@
+// Catalog item management commands
+// NOTE: This is an AI-friendly high-level command that wraps sc_cat_item + item_option_new
+
+import { resolveItemOptionType } from '../helpers.js';
+
+export function catalogCmd(wrap) {
+  return {
+    command: 'catalog <subcommand>',
+    aliases: ['cat'],
+    describe: 'Manage Service Catalog items and variables',
+    builder: (yargs) => {
+      return yargs
+        .command({
+          command: 'create-item',
+          describe: 'Create a catalog item (sc_cat_item) with variables',
+          builder: (y) => y
+            .option('name', { alias: 'n', type: 'string', demandOption: true, describe: 'Catalog item name' })
+            .option('short-description', { alias: 'd', type: 'string', describe: 'Short description' })
+            .option('description', { type: 'string', describe: 'Full description' })
+            .option('category', { alias: 'c', type: 'string', describe: 'Category name (created if missing)' })
+            .option('variable', { alias: 'v', type: 'array', describe: 'Variable definition in format "name:type:label" or "name:type" (e.g. "reason:multilinetext:Reason" or "start_date:date")' })
+            .option('update-set', { type: 'string', describe: 'Update set sys_id or name to capture changes' }),
+          handler: wrap(async (argv, app) => {
+            const name = argv.name;
+            const shortDesc = argv['short-description'] || '';
+            const description = argv.description || shortDesc;
+            let categoryID = '';
+
+            // Resolve or create category
+            if (argv.category) {
+              const catParams = new URLSearchParams();
+              catParams.set('sysparm_query', `title=${argv.category}`);
+              catParams.set('sysparm_limit', '1');
+              catParams.set('sysparm_fields', 'sys_id,title');
+              const cats = await app.sdk.list('sc_category', catParams);
+              if (cats.length > 0) {
+                categoryID = cats[0].sys_id?.value || cats[0].sys_id;
+              } else {
+                const newCat = await app.sdk.create('sc_category', {
+                  title: argv.category,
+                  description: `Category for ${argv.category}`,
+                });
+                categoryID = newCat.sys_id?.value || newCat.sys_id;
+              }
+            }
+
+            // Create the catalog item
+            const item = await app.sdk.create('sc_cat_item', {
+              name,
+              short_description: shortDesc,
+              description,
+              category: categoryID || undefined,
+              active: true,
+              type: 'item',
+              stage: 'requested',
+            });
+            const itemID = item.sys_id?.value || item.sys_id;
+
+            // Parse and create variables
+            const varDefs = [];
+            if (argv.variable) {
+              for (const v of argv.variable) {
+                // Parse "label:type" or "name:type" or "name:type:label" etc.
+                const parts = String(v).split(':');
+                if (parts.length >= 2) {
+                  const typeName = parts.length >= 2 ? parts[parts.length - 2] : '';
+                  const label = parts.length >= 3 ? parts[parts.length - 1] : parts[0];
+                  const typeID = resolveItemOptionType(typeName);
+                  const sysName = parts[0].replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase();
+                  varDefs.push({
+                    name: sysName,
+                    question_text: label,
+                    type: typeID,
+                    order: varDefs.length * 100 + 100,
+                    cat_item: itemID,
+                    mandatory: true,
+                    active: true,
+                  });
+                }
+              }
+
+              for (const vd of varDefs) {
+                try {
+                  await app.sdk.create('item_option_new', vd);
+                } catch (e) {
+                  // variable creation failure is non-fatal
+                }
+              }
+            }
+
+            app.ok({
+              sys_id: itemID,
+              name,
+              category: argv.category || null,
+              variables_created: varDefs.length,
+              update_set: argv['update-set'] || null,
+              instance_url: app.getEffectiveInstance(),
+            }, {
+              summary: `Created catalog item: ${name} (${varDefs.length} variable(s))`,
+              breadcrumbs: [
+                { action: 'view', cmd: `jsn records get --table sc_cat_item --sys-id ${itemID}`, description: 'View the catalog item' },
+                { action: 'edit', cmd: `jsn catalog update-item ${itemID} --name "${name}"`, description: 'Edit the catalog item' },
+              ],
+            });
+          }),
+        })
+        .command({
+          command: 'list-items',
+          aliases: ['ls'],
+          describe: 'List catalog items',
+          builder: (y) => y
+            .option('limit', { alias: 'l', type: 'number', default: 20, describe: 'Max records' })
+            .option('category', { type: 'string', describe: 'Filter by category' }),
+          handler: wrap(async (argv, app) => {
+            let query = 'ORDERBYname';
+            if (argv.category) query = `category.titleLIKE${argv.category}^${query}`;
+            const params = new URLSearchParams();
+            params.set('sysparm_query', query);
+            params.set('sysparm_limit', String(argv.limit));
+            params.set('sysparm_display_value', 'all');
+            params.set('sysparm_fields', 'sys_id,name,short_description,category,active');
+            const items = await app.sdk.list('sc_cat_item', params);
+            app.ok({
+              table: 'sc_cat_item',
+              count: items.length,
+              columns: ['name', 'short_description', 'category', 'active'],
+              records: items.map(r => ({
+                sys_id: r.sys_id?.value || r.sys_id,
+                name: r.name?.display_value || r.name,
+                short_description: r.short_description?.display_value || r.short_description || '',
+                category: r.category?.display_value || '',
+                active: r.active?.display_value || r.active,
+              })),
+              context: { instance_url: app.getEffectiveInstance() },
+            }, { summary: `${items.length} catalog item(s)` });
+          }),
+        });
+    },
+    handler: (argv) => {
+      if (!argv._[1]) {
+        console.log('Manage Service Catalog items.\n');
+        console.log('Commands:');
+        console.log('  create-item    Create a catalog item (fast scaffold)');
+        console.log('  list-items     List catalog items');
+        console.log('\nExamples:');
+        console.log('  jsn catalog create-item "Request PTO" \\');
+        console.log('    --category "Time Off" \\');
+        console.log('    --short-description "Submit a PTO request" \\');
+        console.log('    --variable "start_date:date:Start Date" \\');
+        console.log('    --variable "type:select:Type" \\');
+        console.log('    --variable "reason:multilinetext:Reason/Notes"');
+        console.log('\nVariable types: string, multilinetext, select, date, datetime, reference, checkbox, email');
+        console.log('\nRun "jsn catalog <command> --help" for details.');
+      }
+    },
+  };
+}

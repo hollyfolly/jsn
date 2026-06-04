@@ -44,6 +44,40 @@ function removePKCEState(instance) {
 const DEFAULT_OAUTH_CLIENT_ID = '543e5655f77746a28228c6009a599dfb';
 const REDIRECT_URI = '/sdk-oauth.do';
 
+// ─── Basic auth from environment variables ───
+// SN_USERNAME / SN_PASSWORD — global credentials
+// SN_<INSTANCE>_USERNAME / SN_<INSTANCE>_PASSWORD — instance-specific (e.g. SN_DEV328604_USERNAME)
+
+function envVarName(instance) {
+  // Normalize instance URL to an env-var-safe name
+  // e.g. https://dev328604.service-now.com → DEV328604
+  const host = instance.replace(/https?:\/\//, '').replace(/\/.*$/, '').replace(/\.service-now\.com.*/, '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  return host;
+}
+
+function getBasicAuthFromEnv(instance) {
+  if (!instance) {
+    // Try global env vars
+    const username = process.env.SN_USERNAME;
+    const password = process.env.SN_PASSWORD;
+    if (username && password) return { auth_method: 'basic', username, password };
+    return null;
+  }
+
+  // Try instance-specific env vars first (e.g. SN_DEV328604_USERNAME)
+  const host = envVarName(instance);
+  const instanceUser = process.env[`SN_${host}_USERNAME`];
+  const instancePass = process.env[`SN_${host}_PASSWORD`];
+  if (instanceUser && instancePass) return { auth_method: 'basic', username: instanceUser, password: instancePass };
+
+  // Fall back to global env vars
+  const globalUser = process.env.SN_USERNAME;
+  const globalPass = process.env.SN_PASSWORD;
+  if (globalUser && globalPass) return { auth_method: 'basic', username: globalUser, password: globalPass };
+
+  return null;
+}
+
 // Keychain constants — same as Go version (internal/auth/store.go)
 const KEYRING_SERVICE = 'servicenow-cli';
 const KEYRING_ATTR_SERVICE = 'service';
@@ -218,6 +252,7 @@ export class AuthManager {
 
   isAuthenticated() {
     if (process.env.SERVICENOW_OAUTH_TOKEN) return true;
+    if (getBasicAuthFromEnv()) return true;
     const instance = this.configProvider.getEffectiveInstance();
     if (!instance) return false;
     try {
@@ -230,6 +265,7 @@ export class AuthManager {
 
   isAuthenticatedFor(instance) {
     if (!instance) return false;
+    if (getBasicAuthFromEnv(instance)) return true;
     const creds = loadCredentials(instance);
     if (!creds) return false;
     if (creds.expires_at && Date.now() >= creds.expires_at * 1000) return false;
@@ -244,10 +280,16 @@ export class AuthManager {
     if (!instance) {
       throw errAuth('No instance configured');
     }
+    // Check basic auth from env vars first
+    const basicCreds = getBasicAuthFromEnv(instance);
+    if (basicCreds) return basicCreds;
     return this.getCredentialsFor(instance);
   }
 
   getCredentialsFor(instance) {
+    // Check basic auth from env vars first
+    const basicCreds = getBasicAuthFromEnv(instance);
+    if (basicCreds) return basicCreds;
     const creds = loadCredentials(instance);
     if (!creds) {
       throw errAuth(`Not authenticated for ${instance}`);
@@ -314,13 +356,68 @@ export class AuthManager {
    * Build an OAuth authorization URL and persist PKCE state for later use.
    * After calling this, the user can visit the URL in a browser and then
    * call loginWithCode() with the resulting authorization code.
+   * If waitFile is provided, the method will read the code from that file
+   * (waits for file to appear, polling every 2 seconds, up to 5 minutes).
    */
-  buildAuthURL(instanceURL) {
+  buildAuthURL(instanceURL, waitFile) {
     instanceURL = normalizeInstanceURL(instanceURL);
     const clientID = getOAuthClientID();
     const pkce = generatePKCE();
     savePKCEState(instanceURL, pkce);
-    return buildAuthURL(instanceURL, clientID, pkce);
+    const url = buildAuthURL(instanceURL, clientID, pkce);
+    if (waitFile) {
+      console.log(url);
+      console.log();
+      console.log(`Waiting for authorization code in file: ${waitFile}`);
+      console.log('(polling every 2 seconds — write the code to the file to complete login)');
+      return this._waitForCodeFile(instanceURL, clientID, pkce, waitFile);
+    }
+    return url;
+  }
+
+  async _waitForCodeFile(instanceURL, clientID, pkce, filePath, timeout = 300000) {
+    const start = Date.now();
+    const pollInterval = 2000;
+    while (Date.now() - start < timeout) {
+      try {
+        const code = fs.readFileSync(filePath, 'utf-8').trim();
+        if (code) {
+          console.log(`\nAuthorization code found in ${filePath}`);
+          removePKCEState(instanceURL);
+          const newCreds = await this.exchangeCode(instanceURL, clientID, code, pkce);
+          saveCredentials(instanceURL, newCreds);
+          console.log('Token exchange successful!\n');
+          return newCreds;
+        }
+      } catch {
+        // File not ready yet
+      }
+      await new Promise(r => setTimeout(r, pollInterval));
+    }
+    throw errAuth(`Timed out waiting for authorization code in ${filePath} (${timeout / 1000}s)`);
+  }
+
+  /**
+   * Authenticate with basic auth via environment variables.
+   * Reads SN_USERNAME/SN_PASSWORD (or SN_<INSTANCE>_USERNAME/SN_<INSTANCE>_PASSWORD).
+   * Stores the basic auth credentials so they persist across sessions.
+   */
+  async loginWithPassword(instanceURL) {
+    instanceURL = normalizeInstanceURL(instanceURL);
+    const creds = getBasicAuthFromEnv(instanceURL);
+    if (!creds) {
+      throw errAuth(
+        `No basic auth credentials found in environment.\n\n` +
+        `Set the following environment variables:\n` +
+        `  SN_USERNAME=admin           (or SN_${envVarName(instanceURL)}_USERNAME)\n` +
+        `  SN_PASSWORD=<password>      (or SN_${envVarName(instanceURL)}_PASSWORD)\n\n` +
+        `Then run:\n` +
+        `  jsn auth login --password ${instanceURL}`
+      );
+    }
+    saveCredentials(instanceURL, creds);
+    console.log(`✓ Basic auth credentials saved for ${instanceURL}`);
+    return creds;
   }
 
   /**
