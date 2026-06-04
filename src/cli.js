@@ -12,6 +12,7 @@ import { setupCmd } from './commands/setup.js';
 import { authCmd } from './commands/auth.js';
 import { profilesCmd } from './commands/profiles.js';
 import { recordsCmd } from './commands/records.js';
+import { catalogCmd } from './commands/catalog.js';
 import { incidentsCmd } from './commands/incidents.js';
 import { changesCmd } from './commands/changes.js';
 import { requestsCmd } from './commands/requests.js';
@@ -125,6 +126,7 @@ export const cli = yargs(hideBin(process.argv))
   .command(authCmd(wrap))
   .command(profilesCmd(wrap))
   .command(recordsCmd(wrap))
+  .command(catalogCmd(wrap))
   .command(incidentsCmd(wrap))
   .command(changesCmd(wrap))
   .command(requestsCmd(wrap))

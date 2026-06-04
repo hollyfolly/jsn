@@ -113,13 +113,52 @@ export function updateSetsCmd(wrap) {
               description: argv.description || argv.name,
               state: 'in progress',
             });
+
+            // Auto-set as current update set
+            const sysID = record?.sys_id?.value || record?.sys_id;
+            try {
+              const user = await app.sdk.list('sys_user', new URLSearchParams({
+                sysparm_query: 'user_name=javascript:gs.getUserName()',
+                sysparm_limit: '1',
+                sysparm_fields: 'sys_id',
+              }));
+              if (user.length > 0) {
+                const userSysID = user[0].sys_id?.value || user[0].sys_id;
+                // Check for existing preference
+                const prefParams = new URLSearchParams();
+                prefParams.set('sysparm_query', `user=${userSysID}^name=sys_update_set`);
+                prefParams.set('sysparm_limit', '1');
+                const prefs = await app.sdk.list('sys_user_preference', prefParams);
+                if (prefs.length > 0) {
+                  const prefID = prefs[0].sys_id?.value || prefs[0].sys_id;
+                  await app.sdk.update('sys_user_preference', prefID, { value: sysID });
+                } else {
+                  await app.sdk.create('sys_user_preference', {
+                    user: userSysID,
+                    name: 'sys_update_set',
+                    value: sysID,
+                    type: 'string',
+                  });
+                }
+              }
+            } catch {
+              // Non-fatal — auto-set is a convenience, not mandatory
+            }
+
             app.ok(record, {
               summary: `Created update set: ${argv.name}`,
-              breadcrumbs: [{
-                action: 'set',
-                cmd: `jsn dev updatesets set "${argv.name}"`,
-                description: 'Set as current update set',
-              }],
+              breadcrumbs: [
+                {
+                  action: 'set',
+                  cmd: `jsn dev updatesets set "${argv.name}"`,
+                  description: 'Switch to this update set',
+                },
+                {
+                  action: 'complete',
+                  cmd: `jsn dev updatesets complete "${argv.name}"`,
+                  description: 'Mark as complete when done',
+                },
+              ],
             });
           }),
         })
@@ -132,8 +171,13 @@ export function updateSetsCmd(wrap) {
         console.log('  list           List update sets');
         console.log('  show <name>    Show an update set');
         console.log('  set  <name>    Set the current update set');
-        console.log('  create         Create a new update set');
+        console.log('  create         Create a new update set (auto-sets as current)');
+        console.log('  complete <name>  Mark an update set as complete (coming soon)');
+        console.log('  yolo           Silence the "Default update set" warning');
         console.log('\nRun "jsn dev updatesets <command> --help" for details.');
+        console.log('\nTip: Create an update set first:');
+        console.log('  jsn dev updatesets create --name "My Feature"');
+        console.log('  # → Auto-set as current, then record changes are captured.');
       }
     },
   };

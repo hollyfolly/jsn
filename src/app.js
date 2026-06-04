@@ -118,6 +118,21 @@ export class App {
     const updateSetStr = `]8;;${updateSetLink}\x07${updateSet}]8;;\x07`;
 
     process.stderr.write(`${profileStr} ${userStr} ${scopeStr} ${updateSetStr}\n\n`);
+
+    // ⚠️  Warning if in the Default update set
+    if (updateSet && updateSet.toLowerCase().includes('default')) {
+      process.stderr.write(
+        '\x1b[33m' + // yellow
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '  ⚠  You are in the Default update set!\n' +
+        '  Create a named update set to capture your changes:\n' +
+        '    jsn dev updatesets create --name "My Feature"\n' +
+        '    jsn dev updatesets set "My Feature"\n' +
+        '  (Run \x1b[1mjsn updatesets yolo\x1b[22m to silence this warning)\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
+        '\x1b[0m' // reset
+      );
+    }
   }
 
   ok(data, opts = {}) {

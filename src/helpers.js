@@ -142,3 +142,41 @@ export function parseDataArg(argv) {
     throw new Error(`Invalid JSON: ${e.message}\n\nHint: On Windows PowerShell, use --data-file instead of --data to avoid quote mangling.\nRaw value: ${raw.substring(0, 200)}`, { cause: e });
   }
 }
+
+/**
+ * Translate human-readable type names to ServiceNow item_option_new type IDs.
+ * Maps common names like "date", "select", "multilinetext" to their integer IDs.
+ * Passes through numeric values unchanged.
+ */
+const ITEM_OPTION_TYPE_NAMES = {
+  '1': 1, 'yesno': 1, 'yes/no': 1, 'boolean': 1,
+  '2': 2, 'multilinetext': 2, 'textarea': 2, 'multiline': 2,
+  '3': 3, 'multiplechoice': 3,
+  '4': 4, 'numericscale': 4, 'rating': 4,
+  '5': 5, 'select': 5, 'dropdown': 5, 'choice': 5, 'selectbox': 5,
+  '6': 6, 'string': 6, 'text': 6, 'singlelinetext': 6,
+  '7': 7, 'checkbox': 7, 'check': 7,
+  '8': 8, 'reference': 8, 'lookup': 8,
+  '9': 9, 'date': 9,
+  '10': 10, 'datetime': 10, 'date/time': 10,
+  '11': 11, 'label': 11,
+  '14': 14, 'custom': 14,
+  '18': 18, 'lookupselect': 18, 'lookupselectbox': 18,
+  '20': 20, 'containerstart': 20,
+  '21': 21, 'listcollector': 21,
+  '23': 23, 'html': 23,
+  '26': 26, 'email': 26,
+  '29': 29, 'duration': 29,
+  '31': 31, 'requestedfor': 31,
+  '32': 32, 'richtextlabel': 32, 'richtext': 32,
+};
+
+export function resolveItemOptionType(type) {
+  if (type == null) return 6; // default: Single Line Text
+  if (typeof type === 'number') return type;
+  const lower = String(type).toLowerCase().replace(/[\s_-]/g, '');
+  if (ITEM_OPTION_TYPE_NAMES[lower] != null) return ITEM_OPTION_TYPE_NAMES[lower];
+  const asNum = parseInt(String(type), 10);
+  if (!isNaN(asNum) && asNum > 0 && asNum < 100) return asNum;
+  return 6; // fallback to Single Line Text
+}

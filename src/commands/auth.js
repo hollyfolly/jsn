@@ -5,7 +5,7 @@ import process from 'node:process';
 export function authCmd(wrap) {
   return {
     command: 'auth <subcommand>',
-    describe: 'Manage OAuth authentication',
+    describe: 'Manage authentication (OAuth or basic auth via env vars)',
     builder: (yargs) => {
       return yargs
         .command({
@@ -16,9 +16,17 @@ export function authCmd(wrap) {
               describe: 'Authorization code from browser (bypasses interactive prompt)',
               type: 'string',
             })
+            .option('password', {
+              describe: 'Authenticate with basic auth via env vars (SN_USERNAME/SN_PASSWORD)',
+              type: 'boolean',
+            })
             .option('print-url', {
               describe: 'Print the OAuth URL and exit (saves PKCE state for --code)',
               type: 'boolean',
+            })
+            .option('wait-file', {
+              describe: 'File path to watch for authorization code (used with --print-url)',
+              type: 'string',
             }),
           handler: wrap(async (argv, app) => {
             let instanceURL;
@@ -55,22 +63,29 @@ export function authCmd(wrap) {
 Examples:
   jsn auth login https://dev12345.service-now.com
   jsn auth login dev373698
-  jsn auth login https://acme.service-now.com
+  jsn auth login --password https://dev328604.service-now.com
 
 Find your instance URL in your browser's address bar when logged into ServiceNow.`);
                 }
               }
             }
 
+            // --password: authenticate with basic auth from env vars
+            if (argv.password) {
+              await app.auth.loginWithPassword(instanceURL);
+            }
+            // --print-url with --wait-file: print URL and wait for code file
+            else if (argv.printUrl && argv.waitFile) {
+              await app.auth.buildAuthURL(instanceURL, argv.waitFile);
+            }
             // --print-url: just print the URL and exit
-            if (argv.printUrl) {
+            else if (argv.printUrl) {
               const authURL = app.auth.buildAuthURL(instanceURL);
               console.log(authURL);
               return;
             }
-
             // --code: exchange the provided authorization code directly
-            if (argv.code) {
+            else if (argv.code) {
               await app.auth.loginWithCode(instanceURL, argv.code);
             } else {
               // Interactive: full OAuth flow with browser + prompt
