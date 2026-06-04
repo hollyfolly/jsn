@@ -82,7 +82,7 @@ export function catalogCmd(wrap) {
               for (const vd of varDefs) {
                 try {
                   await app.sdk.create('item_option_new', vd);
-                } catch (e) {
+                } catch {
                   // variable creation failure is non-fatal
                 }
               }
