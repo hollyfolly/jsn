@@ -24,7 +24,7 @@ import { groupRolesCmd } from './commands/grouproles.js';
 import { ticketsCmd } from './commands/tickets.js';
 import { versionCmd } from './commands/version.js';
 import { devCmd } from './commands/dev.js';
-import { skillCmd } from './commands/skill.js';
+import { skillCmd, checkSkill } from './commands/skill.js';
 
 function wrap(handler) {
   return async (argv) => {
@@ -87,6 +87,11 @@ export const cli = yargs(hideBin(process.argv))
     type: 'boolean',
     global: true,
   })
+  .option('no-skill-check', {
+    describe: 'Skip the automatic skill version check',
+    type: 'boolean',
+    global: true,
+  })
   .middleware(async (argv) => {
     // Determine format from flags
     let format = 'auto';
@@ -115,6 +120,19 @@ export const cli = yargs(hideBin(process.argv))
         process.stderr.write('  jsn setup           # Interactive setup\n');
         process.stderr.write(`  jsn auth login ${instance}   # Login to instance\n\n`);
       }
+    }
+
+    // Auto-check skill on every command (fire-and-forget, non-blocking)
+    const skipSkillCheck = ['help', 'version', 'completion', 'skill'].includes(cmd)
+      || process.env.JSN_NO_SKILL_CHECK === '1'
+      || argv['no-skill-check'];
+    if (!skipSkillCheck) {
+      // Fire check but don't await — it runs in background
+      checkSkill().then(result => {
+        if (result && !result.current && result.error) {
+          process.stderr.write(`\n⚠ ${result.error}\n\n`);
+        }
+      }).catch(() => {});
     }
 
     // Print context header for interactive terminals (at the TOP, before command output)

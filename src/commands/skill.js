@@ -18,6 +18,28 @@ function readBundledSkill() {
   }
 }
 
+export async function checkSkill() {
+  const bundled = readBundledSkill();
+  if (!bundled) return { current: false, error: 'Skill file not found in package' };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(SKILL_RAW_URL, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return { current: false, error: `GitHub returned ${res.status}` };
+    const upstream = await res.text();
+    const current = bundled === upstream;
+    return {
+      current,
+      bundled_lines: bundled.split('\n').length,
+      upstream_lines: upstream.split('\n').length,
+      error: current ? null : 'Bundled skill is outdated — run "jsn skill install" to update',
+    };
+  } catch {
+    return { current: false, error: 'Could not check — GitHub unreachable' };
+  }
+}
+
 export function skillCmd(wrap) {
   return {
     command: 'skill',
@@ -41,13 +63,26 @@ export function skillCmd(wrap) {
           }),
         })
         .command({
+          command: 'check',
+          describe: 'Check if the bundled skill file is up to date with GitHub',
+          handler: wrap(async (_argv, app) => {
+            const result = await checkSkill();
+            if (result.error && !result.current) {
+              app.ok(result, { summary: result.error });
+            } else if (result.current) {
+              app.ok(result, { summary: `✓ Skill is current (${result.bundled_lines} lines)` });
+            } else {
+              app.ok(result, { summary: `⚠ Skill is outdated (bundled ${result.bundled_lines} lines vs upstream ${result.upstream_lines} lines) — run "jsn skill install" to update` });
+            }
+          }),
+        })
+        .command({
           command: 'fetch',
           describe: 'Download the latest skill file from GitHub to stdout',
           handler: wrap(async (_argv, _app) => {
             const res = await fetch(SKILL_RAW_URL);
             if (!res.ok) throw new Error(`Failed to fetch skill: ${res.status} ${res.statusText}`);
             const content = await res.text();
-            // Print raw content to stdout for pipe/save usage
             process.stdout.write(content);
           }),
         })
@@ -104,6 +139,6 @@ export function skillCmd(wrap) {
           }),
         });
     },
-    handler: () => {}, // Handled by subcommands
+    handler: () => {},
   };
 }
