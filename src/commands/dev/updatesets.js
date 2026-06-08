@@ -1,4 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { formatRecordForDisplay, getStringField, interactiveList } from '../../helpers.js';
+import { globalConfigDir } from '../../config.js';
 
 export function updateSetsCmd(wrap) {
   return {
@@ -162,6 +165,25 @@ export function updateSetsCmd(wrap) {
             });
           }),
         })
+        .command({
+          command: 'yolo',
+          describe: 'Silence the "Default update set" warning for this session',
+          handler: wrap(async (_argv, app) => {
+            const yoloFile = path.join(globalConfigDir(), '.yolo');
+            fs.mkdirSync(path.dirname(yoloFile), { recursive: true });
+            fs.writeFileSync(yoloFile, String(Date.now()), 'utf-8');
+            process.env.JSN_NO_HEADER = '1';
+            app.ok({
+              suppressed: true,
+              yolo_file: yoloFile,
+            }, {
+              summary: '✓ Default update set warnings suppressed for this session',
+              breadcrumbs: [
+                { action: 'show', cmd: 'jsn dev updatesets list', description: 'Verify update sets' },
+              ],
+            });
+          }),
+        })
 
     },
     handler: (argv) => {
@@ -173,7 +195,6 @@ export function updateSetsCmd(wrap) {
         console.log('  set  <name>    Set the current update set');
         console.log('  create         Create a new update set (auto-sets as current)');
         console.log('  complete <name>  Mark an update set as complete (coming soon)');
-        console.log('  yolo           Silence the "Default update set" warning');
         console.log('\nRun "jsn dev updatesets <command> --help" for details.');
         console.log('\nTip: Create an update set first:');
         console.log('  jsn dev updatesets create --name "My Feature"');

@@ -1,9 +1,11 @@
 // App context: bundles config, auth, SDK, output, and runtime context
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { AuthManager } from './auth.js';
 import { SDKClient } from './sdk.js';
 import { OutputWriter, FormatAuto, FormatJSON, FormatMarkdown, FormatQuiet, FormatStyled } from './output.js';
-import { getEffectiveInstance } from './config.js';
+import { getEffectiveInstance, globalConfigDir } from './config.js';
 import { extractProfileName } from './helpers.js';
 import { getCurrentUser, getCurrentApplication, getCurrentUpdateSet } from './context.js';
 import { errUsage, errAuth } from './errors.js';
@@ -52,6 +54,13 @@ export class App {
   async printContextHeader() {
     if (!this.getEffectiveInstance() || !this.sdk) return;
     if (process.env.JSN_NO_HEADER) return;
+    // Check for yolo sentinel file (set by `jsn dev updatesets yolo`)
+    try {
+      const yoloFile = path.join(globalConfigDir(), '.yolo');
+      if (fs.existsSync(yoloFile)) return;
+    } catch {
+      // ignore — if we can't check the file, proceed with the header
+    }
     if (this.output.getFormat() === FormatJSON || this.output.getFormat() === FormatQuiet) return;
 
     let userDisplayName = 'Unknown';
@@ -138,7 +147,7 @@ export class App {
           '┃  Or switch to a scoped scope first:                    ┃\n' +
           '┃    jsn dev scopes list                                 ┃\n' +
           '┃                                                        ┃\n' +
-          '┃  (Run jsn updatesets yolo to silence this check)       ┃\n' +
+          '┃  (Run jsn dev updatesets yolo to silence this check)    ┃\n' +
           '┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\x1b[0m\n'
         );
       } else {
@@ -149,7 +158,7 @@ export class App {
           '  ⚠  Default update set in scope [' + scope + ']\n' +
           '  Changes are contained to this scope, but a named\n' +
           '  update set is still recommended for tracking.\n' +
-          '  (Run \x1b[1mjsn updatesets yolo\x1b[22m to silence this warning)\n' +
+          '  (Run \x1b[1mjsn dev updatesets yolo\x1b[22m to silence this warning)\n' +
           '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
           '\x1b[0m' // reset
         );
