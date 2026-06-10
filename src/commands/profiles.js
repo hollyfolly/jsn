@@ -1,4 +1,4 @@
-import { saveConfig } from '../config.js';
+import { normalizeInstanceURL, saveConfig, setProfile } from '../config.js';
 
 export function profilesCmd(wrap) {
   return {
@@ -7,6 +7,64 @@ export function profilesCmd(wrap) {
     describe: 'Manage configuration profiles',
     builder: (yargs) => {
       return yargs
+        .command({
+          command: 'create <name>',
+          describe: 'Create a new profile',
+          builder: (sub) => sub
+            .positional('name', {
+              describe: 'Profile name',
+              type: 'string',
+            })
+            .option('instance', {
+              alias: 'i',
+              describe: 'ServiceNow instance URL (e.g. dev12345.service-now.com)',
+              type: 'string',
+            })
+            .option('username', {
+              alias: 'u',
+              describe: 'Username for basic auth',
+              type: 'string',
+            })
+            .option('password', {
+              alias: 'p',
+              describe: 'Password for basic auth',
+              type: 'string',
+            }),
+          handler: wrap(async (argv, app) => {
+            const name = argv.name;
+            if (app.config.profiles && app.config.profiles[name]) {
+              throw new Error(`Profile "${name}" already exists. Use "jsn profiles update" or remove it first.`);
+            }
+
+            let instance = argv.instance;
+            if (!instance) {
+              throw new Error(`Instance URL is required.\n\n  jsn profiles create ${name} --instance https://dev12345.service-now.com`);
+            }
+            instance = normalizeInstanceURL(instance);
+
+            const profile = { instance_url: instance };
+
+            // If username/password provided, save credentials too
+            if (argv.username && argv.password) {
+              const { saveCredentials } = await import('../auth.js');
+              saveCredentials(instance, {
+                auth_method: 'basic',
+                username: argv.username,
+                password: argv.password,
+              });
+              profile.auth_method = 'basic';
+              profile.username = argv.username;
+            }
+
+            await setProfile(app.config, name, profile);
+
+            app.ok({
+              profile: name,
+              instance,
+              auth_method: profile.auth_method || 'oauth (not yet logged in)',
+            }, { summary: `Profile "${name}" created for ${instance}` });
+          }),
+        })
         .command({
           command: 'list',
           describe: 'List all profiles',
@@ -78,8 +136,9 @@ export function profilesCmd(wrap) {
       // When no subcommand is given, show help
       if (!argv._[1]) {
         console.log('Manage your ServiceNow instance profiles.\n');
-        console.log('Usage: jsn profiles <list|show|use|remove> [options]\n');
+        console.log('Usage: jsn profiles <create|list|show|use|remove> [options]\n');
         console.log('Commands:');
+        console.log('  create <name>  Create a new profile (--instance required)');
         console.log('  list           List all profiles');
         console.log('  show [name]    Show profile details');
         console.log('  use  <name>    Switch to a different profile');

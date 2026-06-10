@@ -65,6 +65,13 @@ export class SDKClient {
         return null;
       }
 
+      // Stamp last_seen on successful API call
+      try {
+        if (this.authProvider && typeof this.authProvider.touchLastSeen === 'function') {
+          this.authProvider.touchLastSeen(this.baseURL);
+        }
+      } catch { /* non-fatal */ }
+
       return JSON.parse(body);
     } catch (err) {
       if (err.name === 'AbortError') {

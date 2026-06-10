@@ -176,11 +176,28 @@ export class OutputWriter {
         this.writer.write('\n');
         for (const p of data.profiles) {
           const prefix = p.default ? '* ' : '  ';
-          const status = p.authenticated ? '✓' : '✗';
-          if (p.username) {
-            this.writer.write(`${prefix}${status} ${p.instance} (as ${p.username})\n`);
+          const authIcon = p.authenticated ? '✓' : '✗';
+
+          // Show verified status if we got one
+          let verifiedStr = '';
+          if (p.verified === true) {
+            verifiedStr = ' ✅';
+          } else if (p.verified === false) {
+            verifiedStr = ' ⚠️';
+          }
+
+          // Show stale hint if >7 days since last seen
+          let staleStr = '';
+          if (p.stale && p.days_since_last_seen) {
+            staleStr = ` (${p.days_since_last_seen}d ago — may have been released)`;
+          }
+
+          if (p.name) {
+            this.writer.write(`${prefix}${authIcon} ${p.name} — ${p.instance}${verifiedStr}${staleStr}\n`);
+          } else if (p.username) {
+            this.writer.write(`${prefix}${authIcon} ${p.instance} (as ${p.username})${verifiedStr}${staleStr}\n`);
           } else {
-            this.writer.write(`${prefix}${status} ${p.instance}\n`);
+            this.writer.write(`${prefix}${authIcon} ${p.instance}${verifiedStr}${staleStr}\n`);
           }
         }
       }
