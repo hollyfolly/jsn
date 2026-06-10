@@ -60,6 +60,8 @@ describe('Auth Command Handlers', () => {
         getCredentialsFor: async () => ({ auth_method: 'oauth', access_token: 'tok', refresh_token: 'rtok', expires_at: 9999999999 }),
         isAuthenticated: () => true,
         isAuthenticatedFor: () => true,
+        getLastSeen: () => null,
+        touchLastSeen: () => {},
         refreshToken: async () => ({ auth_method: 'oauth', access_token: 'new-tok', refresh_token: 'new-rtok', expires_at: 9999999999 }),
         logout: () => {},
       },

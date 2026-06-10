@@ -180,10 +180,31 @@ function loadCredentials(instance) {
 }
 
 function saveCredentials(instance, creds) {
+  // Stamp last_seen on every credential save
+  creds.last_seen = creds.last_seen || Math.floor(Date.now() / 1000);
   // Try keyring first, fall back to file
   if (!keyringStore(instance, creds)) {
     fs.writeFileSync(credentialsPath(instance), JSON.stringify(creds, null, 2), { mode: 0o600 });
   }
+}
+
+/**
+ * Get the last_seen timestamp for an instance, if available.
+ */
+function getLastSeen(instance) {
+  const creds = loadCredentials(instance);
+  if (!creds || !creds.last_seen) return null;
+  return creds.last_seen;
+}
+
+/**
+ * Update the last_seen timestamp for an instance to now.
+ */
+function touchLastSeen(instance) {
+  const creds = loadCredentials(instance);
+  if (!creds) return;
+  creds.last_seen = Math.floor(Date.now() / 1000);
+  saveCredentials(instance, creds);
 }
 
 function deleteCredentials(instance) {
@@ -248,6 +269,14 @@ export class AuthManager {
   constructor(configProvider) {
     this.configProvider = configProvider;
     this.httpClient = { timeout: 30000 };
+  }
+
+  getLastSeen(instance) {
+    return getLastSeen(instance);
+  }
+
+  touchLastSeen(instance) {
+    return touchLastSeen(instance);
   }
 
   isAuthenticated() {

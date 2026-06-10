@@ -105,11 +105,25 @@ Find your instance URL in your browser's address bar when logged into ServiceNow
               // Non-fatal — token is saved, just couldn't verify
             }
 
-            // Save to profiles
-            const profileName = instanceURL.replace(/https?:\/\//, '').replace(/\.service-now\.com.*/, '').replace(/[^a-zA-Z0-9]/g, '-');
+            // Save to profiles — deduplicate by instance URL
             if (!app.config.profiles) {
               app.config.profiles = {};
             }
+
+            // Check if a profile already exists for this instance
+            let profileName = null;
+            for (const [existingName, existingProfile] of Object.entries(app.config.profiles)) {
+              if (existingProfile.instance_url === instanceURL) {
+                profileName = existingName;
+                break;
+              }
+            }
+
+            // If no existing profile found, generate a name from the URL
+            if (!profileName) {
+              profileName = instanceURL.replace(/https?:\/\//, '').replace(/\.service-now\.com.*/, '').replace(/[^a-zA-Z0-9]/g, '-');
+            }
+
             app.config.profiles[profileName] = {
               instance_url: instanceURL,
               auth_method: 'oauth',
@@ -130,11 +144,12 @@ Find your instance URL in your browser's address bar when logged into ServiceNow
               authenticated: true,
               instance: instanceURL,
               username: username || undefined,
+              profile: profileName,
               default: setDefault || undefined,
             };
             const summary = username
-              ? `✓ Authenticated to ${instanceURL} as ${username}`
-              : `✓ Authenticated to ${instanceURL}`;
+              ? `✓ Authenticated to ${instanceURL} as ${username} (profile: ${profileName})`
+              : `✓ Authenticated to ${instanceURL} (profile: ${profileName})`;
             app.ok(result, { summary });
           }),
         })
@@ -170,21 +185,54 @@ Examples:
 
             const profiles = [];
             for (const [name, profile] of Object.entries(app.config.profiles || {})) {
-              const isAuth = app.auth.isAuthenticatedFor(profile.instance_url);
+              const instance = profile.instance_url;
+              const isAuth = app.auth.isAuthenticatedFor(instance);
+              const lastSeen = app.auth.getLastSeen(instance);
+
+              // Try live verification
+              let verified = null;
+              let verifiedAt = null;
+              if (isAuth && instance) {
+                try {
+                  const { SDKClient } = await import('../sdk.js');
+                  const sdk = new SDKClient(instance, app.auth);
+                  const user = await sdk.getCurrentUser();
+                  if (user && user.user_name) {
+                    verified = true;
+                    verifiedAt = user.user_name;
+                  }
+                } catch {
+                  verified = false;
+                }
+              }
+
+              // Calculate days since last seen
+              let daysSinceLastSeen = null;
+              if (lastSeen) {
+                daysSinceLastSeen = Math.floor((Date.now() / 1000 - lastSeen) / 86400);
+              }
+
               profiles.push({
                 name,
-                instance: profile.instance_url,
+                instance,
                 authenticated: isAuth,
-                default: profile.instance_url === defaultInstance,
+                verified,
+                verified_as: verifiedAt || undefined,
+                last_seen: lastSeen || undefined,
+                days_since_last_seen: daysSinceLastSeen,
+                stale: daysSinceLastSeen > 7,
+                default: instance === defaultInstance,
               });
             }
 
-            app.ok({
+            const result = {
               default_instance: defaultInstance,
               authenticated: app.auth.isAuthenticated(),
               environment_auth: envToken ? true : undefined,
               profiles,
-            }, { summary: `${profiles.length} profile(s)` });
+            };
+
+            app.ok(result, { summary: `${profiles.length} profile(s)` });
           }),
         })
         .command({
