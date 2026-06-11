@@ -5,6 +5,14 @@ export function setupCmd(wrap) {
   return {
     command: 'setup',
     describe: 'Interactive first-time setup',
+    builder: (yargs) => {
+      return yargs
+        .option('read-only', {
+          describe: 'Mark profile as read-only (blocks mutation commands)',
+          type: 'boolean',
+          default: false,
+        });
+    },
     handler: wrap(async (_argv, app) => {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const ask = (q) => new Promise((resolve) => rl.question(q, resolve));
@@ -20,7 +28,11 @@ export function setupCmd(wrap) {
       console.log(`Instance: ${instance}`);
 
       const profileName = await ask('Profile name (default): ') || 'default';
-      await setProfile(app.config, profileName, { instance_url: instance });
+      const profile = { instance_url: instance };
+      if (_argv['read-only']) {
+        profile.read_only = true;
+      }
+      await setProfile(app.config, profileName, profile);
       // Set as active profile so subsequent commands know which instance to use
       app.config.activeProfile = profileName;
       app.config.defaultProfile = profileName;
