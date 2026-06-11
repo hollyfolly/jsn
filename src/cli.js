@@ -6,6 +6,7 @@ import process from 'node:process';
 import { loadConfig, getEffectiveInstance } from './config.js';
 import { App } from './app.js';
 import { renderHelp } from './help.js';
+import { isMutationCommand } from './mutations.js';
 
 // Command modules
 import { setupCmd } from './commands/setup.js';
@@ -119,6 +120,24 @@ export const cli = yargs(hideBin(process.argv))
         process.stderr.write('To get started, run:\n');
         process.stderr.write('  jsn setup           # Interactive setup\n');
         process.stderr.write(`  jsn auth login ${instance}   # Login to instance\n\n`);
+      }
+    }
+
+    // Read-only profile check — block mutation commands on read-only profiles
+    const activeProfileName = cfg.activeProfile || cfg.defaultProfile;
+    if (activeProfileName && cfg.profiles[activeProfileName] && cfg.profiles[activeProfileName].read_only) {
+      const skipReadOnlyCheck = ['help', 'version', 'setup', 'auth', 'profiles', 'profile', 'skill', undefined].includes(cmd);
+      if (!skipReadOnlyCheck && isMutationCommand(argv)) {
+        process.stderr.write(`\n🔒 Profile "${activeProfileName}" is read-only.\n`);
+        process.stderr.write(`  Mutation commands are disabled on this profile.\n`);
+        const nonReadOnlyProfiles = Object.entries(cfg.profiles || {})
+          .filter(([n, p]) => n !== activeProfileName && !p.read_only)
+          .map(([n]) => n);
+        if (nonReadOnlyProfiles.length > 0) {
+          process.stderr.write(`  Switch to a writable profile:  jsn profiles use ${nonReadOnlyProfiles[0]}\n`);
+        }
+        process.stderr.write('\n');
+        process.exit(1);
       }
     }
 

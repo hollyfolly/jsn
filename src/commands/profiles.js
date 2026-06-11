@@ -29,6 +29,11 @@ export function profilesCmd(wrap) {
               alias: 'p',
               describe: 'Password for basic auth',
               type: 'string',
+            })
+            .option('read-only', {
+              describe: 'Mark profile as read-only (blocks mutation commands)',
+              type: 'boolean',
+              default: false,
             }),
           handler: wrap(async (argv, app) => {
             const name = argv.name;
@@ -56,6 +61,11 @@ export function profilesCmd(wrap) {
               profile.username = argv.username;
             }
 
+            // If read-only flag is set, mark the profile
+            if (argv['read-only']) {
+              profile.read_only = true;
+            }
+
             await setProfile(app.config, name, profile);
 
             app.ok({
@@ -80,9 +90,26 @@ export function profilesCmd(wrap) {
                 username: profile.username || '',
                 authenticated: isAuth,
                 default: isDefault,
+                read_only: profile.read_only || false,
               });
             }
-            app.ok({ profiles }, { summary: `${profiles.length} profile(s)` });
+
+            // Build context-aware breadcrumb: suggest switching to a non-active profile
+            const breadcrumbs = [];
+            if (profiles.length > 0) {
+              const activeName = app.config.activeProfile || app.config.defaultProfile;
+              const nonActiveProfiles = profiles.filter(p => p.name !== activeName);
+              if (nonActiveProfiles.length > 0) {
+                const suggestName = nonActiveProfiles[0].name;
+                breadcrumbs.push({
+                  action: 'switch',
+                  cmd: `jsn profiles use ${suggestName}`,
+                  description: 'Switch to a different profile',
+                });
+              }
+            }
+
+            app.ok({ profiles }, { summary: `${profiles.length} profile(s)`, breadcrumbs });
           }),
         })
         .command({
@@ -108,7 +135,8 @@ export function profilesCmd(wrap) {
               throw new Error('No profiles configured');
             }
             const profile = app.config.profiles[name];
-            app.ok({ name, ...profile }, { summary: `Profile: ${name}` });
+            const readOnlyNote = profile.read_only ? ' [READ-ONLY]' : '';
+            app.ok({ name, ...profile }, { summary: `Profile: ${name}${readOnlyNote}` });
           }),
         })
         .command({
