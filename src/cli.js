@@ -128,7 +128,6 @@ export const cli = yargs(hideBin(process.argv))
     if (activeProfileName && cfg.profiles[activeProfileName] && cfg.profiles[activeProfileName].read_only) {
       const skipReadOnlyCheck = ['help', 'version', 'setup', 'auth', 'profiles', 'profile', 'skill', undefined].includes(cmd);
       if (!skipReadOnlyCheck && isMutationCommand(argv)) {
-        const profileDisplay = cfg.profiles[activeProfileName].instance_url || activeProfileName;
         process.stderr.write(`\n🔒 Profile "${activeProfileName}" is read-only.\n`);
         process.stderr.write(`  Mutation commands are disabled on this profile.\n`);
         const nonReadOnlyProfiles = Object.entries(cfg.profiles || {})
