@@ -43,6 +43,7 @@ export function setupCmd(wrap) {
           console.log(`Using existing credentials for ${instance}`);
         } else {
           const username = await ask('Username: ');
+          rl.close(); // Close outer readline before askHidden creates its own
           const password = await askHidden('Password: ');
           saveCredentials(instance, { auth_method: 'basic', username, password });
           profile.username = username;

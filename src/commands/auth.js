@@ -126,7 +126,7 @@ Find your instance URL in your browser's address bar when logged into ServiceNow
 
             app.config.profiles[profileName] = {
               instance_url: instanceURL,
-              auth_method: 'oauth',
+              auth_method: argv.password ? 'basic' : 'oauth',
               username: username || undefined,
             };
 
