@@ -1,5 +1,6 @@
 import readline from 'node:readline';
 import { getEffectiveInstance, normalizeInstanceURL, saveConfig, setProfile } from '../config.js';
+import { saveCredentials, loadCredentials, askHidden } from '../auth.js';
 
 export function setupCmd(wrap) {
   return {
@@ -32,16 +33,38 @@ export function setupCmd(wrap) {
       if (_argv['read-only']) {
         profile.read_only = true;
       }
+
+      const authMethod = await ask('Authentication method (OAuth/Basic) [OAuth]: ');
+      const useBasic = authMethod.toLowerCase().startsWith('b');
+
+      if (useBasic) {
+        const existing = loadCredentials(instance);
+        if (existing && existing.auth_method === 'basic') {
+          console.log(`Using existing credentials for ${instance}`);
+        } else {
+          const username = await ask('Username: ');
+          const password = await askHidden('Password: ');
+          saveCredentials(instance, { auth_method: 'basic', username, password });
+          profile.username = username;
+          console.log('Basic auth credentials saved');
+        }
+        profile.auth_method = 'basic';
+      } else {
+        profile.auth_method = 'oauth';
+      }
+
       await setProfile(app.config, profileName, profile);
       // Set as active profile so subsequent commands know which instance to use
       app.config.activeProfile = profileName;
       app.config.defaultProfile = profileName;
       saveConfig(app.config);
 
-      const loginNow = await ask('Login now? [Y/n]: ');
-      if (!loginNow || loginNow.toLowerCase() !== 'n') {
-        await app.auth.login(instance);
-        console.log('Login successful!');
+      if (!useBasic) {
+        const loginNow = await ask('Login now? [Y/n]: ');
+        if (!loginNow || loginNow.toLowerCase() !== 'n') {
+          await app.auth.login(instance);
+          console.log('Login successful!');
+        }
       }
 
       rl.close();

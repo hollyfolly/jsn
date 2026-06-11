@@ -544,3 +544,5 @@ export class AuthManager {
     deleteCredentials(instance);
   }
 }
+
+export { saveCredentials, loadCredentials, askHidden };
