@@ -1,4 +1,4 @@
-# CONTEXT.md — jsn domain vocabulary
+# GLOSSARY.md — jsn domain vocabulary
 
 The names we use for the concepts in this codebase. When code, PRs, and docs
 disagree with this file, the file wins until it's updated — update it in the

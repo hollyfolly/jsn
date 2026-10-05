@@ -39,7 +39,7 @@ Tests: `node:test` runner + eslint.
 
 ## Domain vocabulary & decisions
 
-- `CONTEXT.md` — the domain model (command, capability registry, record
+- `GLOSSARY.md` — the domain model (command, capability registry, record
   resolver, session, output envelope, …) and the invariants that must stay
   true. Update it in the same commit that changes a concept.
 - `docs/adr/` — architecture decision records (ADR-0001 covers the
