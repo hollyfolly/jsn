@@ -11,6 +11,7 @@ describe('Config', () => {
   it('should normalize instance URLs', () => {
     assert.strictEqual(normalizeInstanceURL('dev12345.service-now.com'), 'https://dev12345.service-now.com');
     assert.strictEqual(normalizeInstanceURL('https://dev12345.service-now.com/'), 'https://dev12345.service-now.com');
+    assert.strictEqual(normalizeInstanceURL('https://dev354702.service-now.com/now/nav/ui/classic/params/target/ui_page.do%3Fsys_id%3D6391693b931b031087b0f14fdd03d6f1'), 'https://dev354702.service-now.com');
     assert.strictEqual(normalizeInstanceURL('http://dev.local'), 'http://dev.local');
   });
 });
