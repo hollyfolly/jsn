@@ -135,6 +135,111 @@ describe('formatUpdateSetDetail', () => {
   });
 });
 
+// ─── Update-set hierarchy ───
+
+describe('update-set hierarchy detail', () => {
+  const records = {
+    root: { sys_id: 'root', name: 'Root', state: 'complete', application: { display_value: 'Global', value: 'global' }, description: 'Root description' },
+    parent: { sys_id: 'parent', name: 'Parent', state: 'in progress', application: { display_value: 'App', value: 'scope-app' }, parent: { display_value: 'Root', value: 'root' } },
+    selected: { sys_id: 'selected', name: 'Selected', state: 'in progress', application: { display_value: 'App', value: 'scope-app' }, parent: { display_value: 'Parent', value: 'parent' }, description: 'Selected description' },
+    child: { sys_id: 'child', name: 'Child', state: 'in progress', application: { display_value: 'App', value: 'scope-app' }, parent: { display_value: 'Selected', value: 'selected' } },
+    grandchild: { sys_id: 'grandchild', name: 'Grandchild', state: 'complete', application: { display_value: 'App', value: 'scope-app' }, parent: { display_value: 'Child', value: 'child' } },
+    sibling: { sys_id: 'sibling', name: 'Sibling', state: 'ignored', application: { display_value: 'Other', value: 'scope-other' }, parent: { display_value: 'Selected', value: 'selected' } },
+  };
+
+  function buildApp() {
+    return {
+      getEffectiveInstance: () => 'https://dev.service-now.com',
+      sdk: {
+        list: async (table, params) => {
+          if (table === 'sys_update_xml') return [];
+          const query = params.get('sysparm_query') || '';
+          if (query.startsWith('sys_id=')) {
+            const record = records[query.slice('sys_id='.length)];
+            if (!record) return [];
+            const copy = { ...record };
+            if (copy.application?.value && !copy['application.scope']) {
+              copy['application.scope'] = { display_value: copy.application.value, value: copy.application.value };
+            }
+            return [copy];
+          }
+          if (query.startsWith('parent=')) {
+            const parentId = query.slice('parent='.length).split('^')[0];
+            return Object.values(records).filter((record) => record.parent?.value === parentId).map((record) => ({ ...record }));
+          }
+          return [];
+        },
+      },
+    };
+  }
+
+  it('renders description, selected marker, ancestor-first ordering, and recursive descendants', async () => {
+    const { formatUpdateSetDetail } = await import('../src/commands/updatesets.js');
+    const detail = await formatUpdateSetDetail(buildApp(), { sys_id: 'selected', name: 'Selected' });
+    assert.strictEqual(detail.description, 'Selected description');
+    assert.deepStrictEqual(detail.hierarchy.map((row) => row.sys_id), ['root', 'parent', 'selected', 'child', 'grandchild', 'sibling']);
+    assert.strictEqual(detail.hierarchy.find((row) => row.selected).sys_id, 'selected');
+    assert.match(detail._formatted, /Description: Selected description/);
+    assert.match(detail._formatted, /Update set hierarchy:/);
+    assert.match(detail._formatted, /◉ Selected \[in progress\] \(App\/scope-app\)/);
+    const tree = detail._formatted.split('Update set hierarchy:\n')[1];
+    assert.ok(tree.indexOf('Root') < tree.indexOf('Parent'));
+    assert.ok(tree.indexOf('Parent') < tree.indexOf('Selected'));
+    assert.ok(tree.indexOf('Selected') < tree.indexOf('Child'));
+    assert.ok(tree.indexOf('Child') < tree.indexOf('Grandchild'));
+    assert.match(detail._formatted, /├──|└──/);
+    assert.match(detail._formatted, /State:.*Scope:/s);
+  });
+
+  it('keeps payload details separate from the update-set hierarchy', async () => {
+    const { formatUpdateSetDetail } = await import('../src/commands/updatesets.js');
+    const app = buildApp();
+    app.sdk.list = async (table, params) => {
+      if (table === 'sys_update_xml') return [{ name: 'sys_script_abc', sys_updated_on: '2026-01-01', sys_class_name: 'sys_script' }];
+      return buildApp().sdk.list(table, params);
+    };
+    const detail = await formatUpdateSetDetail(app, { sys_id: 'selected', name: 'Selected' });
+    assert.deepStrictEqual(detail.children.map((child) => child.name), ['sys_script_abc']);
+    assert.deepStrictEqual(detail.hierarchy.map((row) => row.name), ['Root', 'Parent', 'Selected', 'Child', 'Grandchild', 'Sibling']);
+  });
+
+  it('reports missing parents without failing the detail view', async () => {
+    const { formatUpdateSetDetail } = await import('../src/commands/updatesets.js');
+    const app = buildApp();
+    app.sdk.list = async (table, params) => {
+      if (table === 'sys_update_xml') return [];
+      const query = params.get('sysparm_query') || '';
+      if (query === 'sys_id=selected') return [{ ...records.selected, parent: { display_value: 'Gone', value: 'missing' } }];
+      return [];
+    };
+    const detail = await formatUpdateSetDetail(app, { sys_id: 'selected', name: 'Selected' });
+    assert.ok(detail.hierarchy.some((row) => row.missing && row.sys_id === 'missing'));
+    assert.match(detail._formatted, /missing parent.*Gone|Gone.*missing parent/i);
+  });
+
+  it('stops safely on ancestor and descendant cycles', async () => {
+    const { formatUpdateSetDetail } = await import('../src/commands/updatesets.js');
+    const cycle = {
+      a: { sys_id: 'a', name: 'Cycle A', state: 'in progress', application: 'Global', parent: { display_value: 'Cycle B', value: 'b' } },
+      b: { sys_id: 'b', name: 'Cycle B', state: 'in progress', application: 'Global', parent: { display_value: 'Cycle A', value: 'a' } },
+    };
+    const app = {
+      getEffectiveInstance: () => 'https://dev.service-now.com',
+      sdk: { list: async (table, params) => {
+        if (table === 'sys_update_xml') return [];
+        const query = params.get('sysparm_query') || '';
+        if (query.startsWith('sys_id=')) return cycle[query.slice(7)] ? [{ ...cycle[query.slice(7)] }] : [];
+        if (query.startsWith('parent=')) return Object.values(cycle).filter((record) => record.parent.value === query.slice(7)).map((record) => ({ ...record }));
+        return [];
+      } },
+    };
+    const detail = await formatUpdateSetDetail(app, { sys_id: 'a', name: 'Cycle A' });
+    assert.ok(detail.hierarchy.length <= 3);
+    assert.ok(detail.hierarchy.every((row, index, rows) => rows.findIndex((candidate) => candidate.sys_id === row.sys_id) === index));
+    assert.match(detail._formatted, /cycle/i);
+  });
+});
+
 // ─── Scope mismatch warning ───
 
 describe('formatUpdateSetLabel', () => {
