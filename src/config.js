@@ -29,11 +29,17 @@ export function cacheDir() {
 export function normalizeInstanceURL(url) {
   if (!url) return '';
   url = url.trim();
-  url = url.replace(/\/$/, '');
   if (!/^https?:\/\//i.test(url)) {
     url = 'https://' + url;
   }
-  return url;
+  try {
+    // Profiles store the instance origin, never a page, API route, query, or
+    // fragment pasted from the browser.
+    return new URL(url).origin;
+  } catch {
+    // Preserve the old permissive behavior for non-standard local endpoints.
+    return url.replace(/\/$/, '');
+  }
 }
 
 function loadFromFile(cfg, filePath, source) {
