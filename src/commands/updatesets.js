@@ -88,14 +88,144 @@ export async function resolveUpdateSetByName(app, name) {
   throw errUsage(`Multiple update sets named "${name}" (${records.length}): ${scopes}.${scopeNote}\nRun bare "jsn updatesets set" and pick by scope.`);
 }
 
+
+function rawReferenceId(value) {
+  if (!value) return '';
+  if (typeof value === 'object') return String(value.value || value.sys_id || '');
+  return String(value);
+}
+
+function referenceName(value) {
+  if (!value) return '';
+  if (typeof value === 'object') return String(value.display_value || value.name || value.value || value.sys_id || '');
+  return String(value);
+}
+
+function updateSetApplication(record) {
+  const appName = getStringField(record, 'application') || '';
+  const scopeName = getStringField(record, 'application.scope') || '';
+  return appName && scopeName ? `${appName}/${scopeName}` : (appName || scopeName || '?');
+}
+
+function updateSetHierarchyRow(record, { depth, kind, selected = false, missing = false } = {}) {
+  return {
+    sys_id: getStringField(record, 'sys_id'),
+    name: getStringField(record, 'name') || referenceName(record),
+    state: getStringField(record, 'state') || '?',
+    application: updateSetApplication(record),
+    scope: updateSetApplication(record),
+    parent: referenceName(record.parent),
+    depth,
+    kind,
+    selected,
+    missing,
+  };
+}
+
+async function fetchUpdateSetById(app, sysID) {
+  if (!sysID) return null;
+  const params = new URLSearchParams();
+  params.set('sysparm_query', `sys_id=${sysID}`);
+  params.set('sysparm_limit', '1');
+  params.set('sysparm_display_value', 'all');
+  params.set('sysparm_fields', 'sys_id,name,state,application,application.scope,parent,description,sys_created_on,sys_updated_on');
+  const records = await app.sdk.list('sys_update_set', params);
+  return Array.isArray(records) && records.length > 0 ? records[0] : null;
+}
+
+/** Build a safe, flat preorder hierarchy with ancestors before the selected set. */
+export async function buildUpdateSetHierarchy(app, selectedRecord) {
+  const selectedID = getStringField(selectedRecord, 'sys_id');
+  const visited = new Set(selectedID ? [selectedID] : []);
+  const cycleIds = new Set();
+  const missingParents = [];
+  const ancestors = [];
+  let parentRef = selectedRecord?.parent;
+
+  while (rawReferenceId(parentRef)) {
+    const parentID = rawReferenceId(parentRef);
+    const parentDisplay = referenceName(parentRef);
+    if (visited.has(parentID)) {
+      cycleIds.add(parentID);
+      break;
+    }
+    visited.add(parentID);
+    let parent;
+    try { parent = await fetchUpdateSetById(app, parentID); } catch { parent = null; }
+    if (!parent) {
+      missingParents.push(parentID);
+      ancestors.push({ sys_id: parentID, name: parentDisplay || `[missing parent ${parentID}]`, parent: null, missing: true });
+      break;
+    }
+    ancestors.push(parent);
+    parentRef = parent.parent;
+  }
+
+  const descendants = [];
+  async function walkChildren(parentID, depth) {
+    if (!parentID) return;
+    let children;
+    try {
+      const params = new URLSearchParams();
+      params.set('sysparm_query', `parent=${parentID}^ORDERBYname`);
+      params.set('sysparm_limit', '500');
+      params.set('sysparm_display_value', 'all');
+      params.set('sysparm_fields', 'sys_id,name,state,application,application.scope,parent,description,sys_created_on,sys_updated_on');
+      children = await app.sdk.list('sys_update_set', params);
+    } catch {
+      children = [];
+    }
+    if (!Array.isArray(children)) return;
+    for (const child of children) {
+      const childID = getStringField(child, 'sys_id');
+      if (!childID) continue;
+      if (visited.has(childID)) {
+        cycleIds.add(childID);
+        continue;
+      }
+      visited.add(childID);
+      descendants.push({ record: child, depth });
+      await walkChildren(childID, depth + 1);
+    }
+  }
+
+  const hierarchy = [
+    ...ancestors.reverse().map((record, index) => updateSetHierarchyRow(record, { depth: index, kind: 'ancestor', missing: record.missing })),
+    updateSetHierarchyRow(selectedRecord, { depth: ancestors.length, kind: 'selected', selected: true }),
+  ];
+  await walkChildren(selectedID, ancestors.length + 1);
+  hierarchy.push(...descendants.map(({ record, depth }) => updateSetHierarchyRow(record, { depth, kind: 'descendant' })));
+
+  return { hierarchy, cycleIds: [...cycleIds], missingParents };
+}
+
+function renderUpdateSetHierarchy(rows, cycleIds = [], missingParents = []) {
+  const lines = ['Update set hierarchy:'];
+  const hasLaterSibling = (index, depth) => {
+    for (let i = index + 1; i < rows.length; i += 1) {
+      if (rows[i].depth < depth) return false;
+      if (rows[i].depth === depth) return true;
+    }
+    return false;
+  };
+  rows.forEach((row, index) => {
+    const continuation = [];
+    for (let level = 0; level < row.depth - 1; level += 1) {
+      continuation.push(hasLaterSibling(index, level) ? '│   ' : '    ');
+    }
+    const connector = row.depth > 0 ? (hasLaterSibling(index, row.depth) ? '├── ' : '└── ') : '';
+    const marker = row.selected ? '◉' : '○';
+    const missing = row.missing ? ' [missing parent]' : '';
+    lines.push(`${continuation.join('')}${connector}${marker} ${row.name}${missing} [${row.state}] (${row.scope})`);
+  });
+  if (missingParents.length > 0) lines.push(`  ⚠️ Missing parent records: ${missingParents.join(', ')}`);
+  if (cycleIds.length > 0) lines.push(`  ⚠️ Hierarchy cycle detected; repeated branch omitted (${cycleIds.join(', ')})`);
+  return lines;
+}
+
 /**
- * Rich display for an update set: header fields + child update filenames.
- * Children (sys_update_xml) listed filename-only, sorted by sys_updated_on
- * descending (newest first). Shared by `list` pick and `show`.
- *
- * Fetches an enriched record itself (sysparm_display_value=all so the parent
- * reference renders as a name, not a sys_id) — callers can pass a thin
- * picker record; the formatter completes it.
+ * Rich display for an update set: header fields, update-set hierarchy, and
+ * separate child update payload details.
  */
 export async function formatUpdateSetDetail(app, record) {
   const sysID = getStringField(record, 'sys_id');
@@ -109,7 +239,7 @@ export async function formatUpdateSetDetail(app, record) {
     params.set('sysparm_query', `sys_id=${sysID}`);
     params.set('sysparm_limit', '1');
     params.set('sysparm_display_value', 'all');
-    params.set('sysparm_fields', 'sys_id,name,state,application,application.scope,parent,sys_created_on,sys_updated_on');
+    params.set('sysparm_fields', 'sys_id,name,state,application,application.scope,parent,description,sys_created_on,sys_updated_on');
     const recs = await app.sdk.list('sys_update_set', params);
     if (Array.isArray(recs) && recs.length > 0) full = recs[0];
   } catch {
@@ -123,6 +253,7 @@ export async function formatUpdateSetDetail(app, record) {
   const parent = getStringField(full, 'parent') || '';
   const created = getStringField(full, 'sys_created_on') || '';
   const updated = getStringField(full, 'sys_updated_on') || '';
+  const description = getStringField(full, 'description');
 
   // Child updates: filename only, newest first by sys_updated_on.
   // Also group by element type (sys_class_name) and flag risky types for
@@ -170,6 +301,7 @@ export async function formatUpdateSetDetail(app, record) {
     // children are best-effort — a broken query shouldn't kill the display
   }
 
+  const hierarchyData = await buildUpdateSetHierarchy(app, full);
   const lines = [];
   lines.push(`Update set: ${name}`);
   lines.push(`  State:     ${state}`);
@@ -177,7 +309,10 @@ export async function formatUpdateSetDetail(app, record) {
   if (parent) lines.push(`  Parent:    ${parent}`);
   if (created) lines.push(`  Created:   ${created}`);
   if (updated) lines.push(`  Updated:   ${updated}`);
-  lines.push(`Updates:   ${children.length}`);
+  if (description) lines.push(`  Description: ${description}`);
+  lines.push(...renderUpdateSetHierarchy(hierarchyData.hierarchy, hierarchyData.cycleIds, hierarchyData.missingParents));
+  lines.push('Payload / update XML:');
+  lines.push(`  Updates:   ${children.length}`);
   const typeEntries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
   if (typeEntries.length > 0) {
     lines.push(`  By type:  ${typeEntries.map(([t, n]) => `${t}×${n}`).join(', ')}`);
@@ -243,6 +378,11 @@ export async function formatUpdateSetDetail(app, record) {
     parent,
     sys_created_on: created,
     sys_updated_on: updated,
+    description,
+    scope: application,
+    hierarchy: hierarchyData.hierarchy,
+    hierarchy_cycles: hierarchyData.cycleIds,
+    hierarchy_missing_parents: hierarchyData.missingParents,
     children,
     by_type: byType,
     risky_count: risky.length,
