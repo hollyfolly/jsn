@@ -480,6 +480,43 @@ test('post-PUT read failures retain action ID and unverified update status', asy
   await assert.rejects(sdk.updateProcessFlowAction(ID, SCOPE, definition()), e => e.code === 'action_update_failed' && e.details.sys_id === ID && e.details.status === 'unverified');
 });
 
+for (const [label, change] of [
+  ['maximum size', d => { d.outputs[0].maxsize = 1; }],
+  ['reference qualifier', d => { d.steps[0].inputs.find(v => v.name === 'connection_alias').ref_qual = ''; }],
+  ['runtime choices', d => { d.steps[0].inputs.find(v => v.name === 'required_run_time').choices = []; }],
+]) {
+  test(`readback rejects changed ${label} constraints`, async () => {
+    const source = { ...definition(), ...structuredClone(createFixture.source), id: ID, scope: SCOPE };
+    source.steps[0].action = ID;
+    const saved = structuredClone(source); change(saved);
+    const { sdk } = client(responder(saved));
+    await assert.rejects(sdk.updateProcessFlowAction(ID, SCOPE, source), e => e.code === 'action_verification_failed');
+  });
+}
+
+test('readback rejects retained step error handling omitted from update', async () => {
+  const current = definition(); current.steps[0].error_handling_type = 'EVAL_ERRORS';
+  const source = structuredClone(current); delete source.steps[0].error_handling_type;
+  const { sdk } = client(responder(current));
+  await assert.rejects(sdk.updateProcessFlowAction(ID, SCOPE, source), e => e.code === 'action_verification_failed');
+});
+
+for (const key of ['master_snapshot', 'latest_snapshot', 'action_status_metadata']) {
+  test(`readback rejects changed protected ${key}`, async () => {
+    const current = definition(); let saved = current;
+    const { sdk } = client(c => {
+      if (c.method === 'PUT') {
+        saved = structuredClone(c.body);
+        if (key === 'action_status_metadata') saved[key].sysId = 'f'.repeat(32);
+        else saved[key] = 'f'.repeat(32);
+        return { result: saved };
+      }
+      return responder(saved)(c);
+    });
+    await assert.rejects(sdk.updateProcessFlowAction(ID, SCOPE, current), e => e.code === 'action_verification_failed');
+  });
+}
+
 test('missing errorCode and nonempty errorMessage are dispatch failures', async () => {
   for (const response of [{ data: CONTEXT }, { data: CONTEXT, errorCode: 0, errorMessage: 'rejected' }]) {
     const base = responder();

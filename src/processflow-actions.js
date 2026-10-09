@@ -100,7 +100,7 @@ export function validateDefinition(definition, id, scope) {
 }
 
 // Check executable intent, not server-assigned record/UI IDs or display caches.
-const VARIABLE_FIELDS = ['name', 'type', 'value', 'defaultValue', 'mandatory', 'reference', 'data_structure', 'scriptActive', 'script', 'scriptAsJsonString', 'children', 'complexObjectValue'];
+const VARIABLE_FIELDS = ['name', 'type', 'value', 'defaultValue', 'mandatory', 'reference', 'data_structure', 'scriptActive', 'script', 'scriptAsJsonString', 'children', 'complexObjectValue', 'maxsize', 'ref_qual', 'choices', 'defaultChoices', 'choiceOption', 'table', 'dependent_on', 'sys_class_name', 'extended', 'local', 'dynamic'];
 function subset(expected, actual, path, mismatches) {
   if (Array.isArray(expected)) {
     if (!Array.isArray(actual) || expected.length !== actual.length) { mismatches.push(path); return; }
@@ -138,6 +138,7 @@ function equalIntent(expected, actual) {
 function lifecycleDefault(variable, found) {
   const normalized = { ...variable };
   if (!variable.scriptActive && variable.script === null && equalIntent(found.script, {})) normalized.script = {};
+  if (variable.name === '__dont_treat_as_error__' && variable.type === 'boolean' && variable.value === false && !variable.scriptActive && variable.maxsize === 0 && found.maxsize === 40) normalized.maxsize = 40;
   if (variable.name !== '__action_status__' || variable.type !== 'object' || variable.value !== '' || variable.complexObjectValue !== null || variable.scriptActive) return normalized;
   // Captured fresh status becomes a serialized EMPTY code/message object on PUT.
   try {
@@ -156,6 +157,7 @@ function lifecycleDefault(variable, found) {
       && emptyFacet(value.complexObjectSchema['FlowDesigner:FDACTIONSTATUS.$type_facets'], 65000, 'object');
     if (equalIntent(Object.keys(value).sort(), ['complexObject', 'complexObjectSchema', 'serializationFormat', 'version']) && value.version === '1.0' && value.serializationFormat === 'JSON' && defaultSchema && schema?.code === 'Integer' && schema?.message === 'String' && equalIntent(value.complexObject, empty)) normalized.value = found.value;
   } catch { /* Non-default values remain mismatches. */ }
+  if (normalized.value === found.value && variable.maxsize === 0 && found.maxsize === 65000) normalized.maxsize = 65000;
   const emptyObject = { name: variable.name, value: null, scriptActive: false, script: null, scriptAsJsonString: null, parameter: null,
     children: (variable.children || []).map(child => ({ name: child.name, value: null, scriptActive: false, script: null, scriptAsJsonString: null, children: null, parameter: child })) };
   const statusIntent = node => {
@@ -180,8 +182,11 @@ function variables(expected, actual, path, mismatches, inherited = new Set()) {
 }
 function verify(expected, actual, inherited) {
   const mismatches = [];
-  for (const key of ['id', 'scope', 'name', 'description', 'internal_name', 'state']) {
+  for (const key of ['id', 'scope', 'name', 'description', 'internal_name', 'state', 'master_snapshot', 'latest_snapshot']) {
     if (Object.hasOwn(expected, key)) subset(expected[key], actual[key], key, mismatches);
+  }
+  for (const key of ['sysId', 'actionTypeId']) {
+    if (expected.action_status_metadata?.[key] !== actual.action_status_metadata?.[key]) mismatches.push(`action_status_metadata.${key}`);
   }
   variables(expected.inputs, actual.inputs, 'inputs', mismatches);
   variables(expected.outputs, actual.outputs, 'outputs', mismatches, inherited);
@@ -194,8 +199,8 @@ function verify(expected, actual, inherited) {
   for (const step of expected.steps) {
     const found = actual.steps.find(s => s.cid === step.cid);
     if (!found) { mismatches.push(`steps.${step.cid}`); continue; }
-    for (const key of ['cid', 'action', 'step_type', 'step_type_id', 'order', 'error_handling_type']) {
-      if (Object.hasOwn(step, key)) subset(step[key], found[key], `steps.${step.cid}.${key}`, mismatches);
+    for (const key of ['cid', 'action', 'step_type', 'step_type_id', 'order', 'error_handling_type', 'quiescence']) {
+      if (!equalIntent(step[key] ?? null, found[key] ?? null)) mismatches.push(`steps.${step.cid}.${key}`);
     }
     for (const key of ['inputs', 'outputs', 'extended_inputs', 'extended_outputs']) variables(step[key], found[key], `steps.${step.cid}.${key}`, mismatches);
   }
