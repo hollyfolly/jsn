@@ -42,8 +42,8 @@ matches `argv._[0]` against hand-written string lists.
 
 Capabilities: `mutationSubcommands`, `noInstance`, `skipDailyChecks`.
 
-> Replaced: hand-maintained skip-lists in `cli.js` + the hand-written mutation
-> registry in `mutations.js` (see `docs/adr/0001-architecture-deepening.md`).
+> Replaced: hand-maintained skip-lists in `cli.js` plus the hand-written
+> mutation registry in `mutations.js`.
 
 ## Record resolver
 
@@ -67,10 +67,8 @@ The composite answer to "which instance am I talking to, as whom, with what
 credentials and flags?" — effective instance URL, active profile (name +
 `read_only`/`skip_confirmations` flags), username for credential keying.
 
-> **In progress** (Wave 2). Today this is assembled ad hoc across `app.js`
-> (`_overrideInstance`, `getEffectiveInstance`), `cli.js` middleware, `auth.js`,
-> and `config.js`. The session resolver consolidates it into one module. See
-> ADR-0001.
+`src/session.js` owns session resolution and application. Commands can select
+an instance or profile without mutating the saved active profile.
 
 ## Output envelope
 
@@ -128,4 +126,4 @@ rendering. `src/commands/flows.js` only adapts yargs/App output to this seam.
   Command that needs a bespoke styled view ships `_formatted`.
 - **One canonical map per domain concept.** e.g. `item_option_new` types live
   in `ITEM_OPTION_TYPE_NAMES` / `resolveItemOptionType` (helpers.js). A second
-  inline copy is a bug — the first one drifted 5 values wrong (see ADR-0001).
+  inline copy is a bug.

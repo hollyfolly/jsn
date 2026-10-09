@@ -68,7 +68,6 @@ export async function enrichCatalogItem({ sdk, instanceUrl, sysID }) {
     flowCmd = `jsn flows show ${flowVal.value}`;
   }
   const wfName = getStringField(item, 'workflow') || '';
-  const wfID = item.workflow?.value || '';
   const planName = getStringField(item, 'delivery_plan') || getStringField(item, 'execution_plan') || '';
 
   const data = {
@@ -80,7 +79,7 @@ export async function enrichCatalogItem({ sdk, instanceUrl, sysID }) {
     flow: flowName || undefined,
     flow_cmd: flowCmd || undefined,
     workflow: wfName || undefined,
-    workflow_cmd: (wfName && wfID) ? `jsn workflows show ${wfID}` : undefined,
+
     execution_plan: planName || undefined,
     variables: totalVars > 0 ? {
       count: totalVars,
@@ -117,7 +116,6 @@ export function buildCatalogFormatted(data, standalone, setVars, totalVars) {
   if (data.workflow) {
     lines.push('─ Workflow ─');
     lines.push(`  ${data.workflow}`);
-    if (data.workflow_cmd) lines.push(`  → ${data.workflow_cmd}`);
     lines.push('');
   }
   if (totalVars > 0) {
