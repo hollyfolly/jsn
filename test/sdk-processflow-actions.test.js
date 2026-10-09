@@ -141,9 +141,10 @@ test('PUT timeout with unpersisted steps remains an explicit failure', async () 
   assert.equal(calls.filter(c => c.method === 'PUT').length, 1);
 });
 
-function creating({ failPut = false, lostSteps = false, readFailure = false, captured = false, mutate = () => {} } = {}) {
+function creating({ failPut = false, lostSteps = false, readFailure = false, captured = false, generatedStatus = false, mutate = () => {} } = {}) {
   let saved;
   const fresh = definition(); fresh.inputs = []; fresh.steps = [];
+  if (generatedStatus) fresh.action_status_metadata.sysId = '';
   fresh.outputs = captured ? structuredClone(createFixture.freshOutputs)
     : [{ name: '__action_status__', type: 'object', id: '1'.repeat(32), children: [] }];
   return client(c => {
@@ -201,6 +202,21 @@ for (const options of [{ failPut: true }, { lostSteps: true }, { readFailure: tr
     assert.equal(calls.filter(c => c.method === 'DELETE').length, 0);
   });
 }
+
+test('create accepts a newly allocated status ID but never an invalid or foreign status binding', async () => {
+  for (const [label, statusID, actionID, passes] of [
+    ['new status', 'e'.repeat(32), ID, true],
+    ['invalid status', '', ID, false],
+    ['foreign binding', 'e'.repeat(32), 'f'.repeat(32), false],
+  ]) {
+    const { sdk } = creating({ generatedStatus: true, mutate: d => {
+      d.action_status_metadata.sysId = statusID;
+      d.action_status_metadata.actionTypeId = actionID;
+    } });
+    if (passes) assert.equal((await sdk.createProcessFlowAction(SCOPE, definition())).status, 'verified', label);
+    else await assert.rejects(sdk.createProcessFlowAction(SCOPE, definition()), e => e.code === 'action_create_partial', label);
+  }
+});
 
 test('create validates definition and scope existence before creating parent', async () => {
   const { sdk, calls } = client(() => ({ result: null }));

@@ -186,7 +186,12 @@ function verify(expected, actual, inherited) {
     if (Object.hasOwn(expected, key)) subset(expected[key], actual[key], key, mismatches);
   }
   for (const key of ['sysId', 'actionTypeId']) {
-    if (expected.action_status_metadata?.[key] !== actual.action_status_metadata?.[key]) mismatches.push(`action_status_metadata.${key}`);
+    const before = expected.action_status_metadata?.[key];
+    const after = actual.action_status_metadata?.[key];
+    // The first create PUT allocates the status row; later updates must retain it.
+    const allocated = key === 'sysId' && inherited !== undefined && (before === '' || before === null || before === undefined)
+      && typeof after === 'string' && /^[a-fA-F0-9]{32}$/.test(after);
+    if (!allocated && (before !== after || (key === 'sysId' && inherited !== undefined && !before))) mismatches.push(`action_status_metadata.${key}`);
   }
   variables(expected.inputs, actual.inputs, 'inputs', mismatches);
   variables(expected.outputs, actual.outputs, 'outputs', mismatches, inherited);
