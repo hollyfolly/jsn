@@ -5,6 +5,7 @@ export const ACTION_TABLE = 'sys_hub_action_type_definition';
 const ROOT = '/api/now/processflow/action';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const raw = value => object(value) ? value.value : value;
+const successCode = value => value === 0 || value === '0';
 function token(value, label, global = false) {
   if (typeof value !== 'string' || (!/^[a-fA-F0-9]{32}$/.test(value) && !(global && value === 'global'))) {
     throw errUsage(`${label} must be an exact sys_id${global ? ' or global' : ''}`);
@@ -25,7 +26,7 @@ async function request(sdk, id, scope, suffix = '', method = 'GET', body, opts =
     ...opts, method, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const result = response?.result;
-  if (response?.error || result?.error || (result?.errorCode !== undefined && Number(result.errorCode) !== 0)) {
+  if (response?.error || result?.error || (result?.errorCode !== undefined && !successCode(result.errorCode))) {
     throw failure('action_api_error', result?.errorMessage || response?.error?.message || 'Process Flow request failed');
   }
   if (result === undefined || result === null) throw failure('action_api_error', 'Process Flow returned no result');
@@ -112,36 +113,95 @@ function subset(expected, actual, path, mismatches) {
     }
   } else if (expected !== actual) mismatches.push(path);
 }
-function variables(expected, actual, path, mismatches) {
+// Only these attribute keys are UI/generated metadata, not schema constraints.
+const UI_ATTRIBUTES = new Set(['uiUniqueId', 'uiTypeLabel', 'uiType', 'element_mapping_provider']);
+function semantic(value) {
+  if (Array.isArray(value)) return value.map(semantic);
+  if (object(value)) return Object.fromEntries(Object.keys(value).sort().map(k => [k, semantic(value[k])]));
+  return value;
+}
+function variableField(variable, field) {
+  const value = variable[field];
+  if (field === 'children') return (value || []).map(variableIntent);
+  if (field === 'mandatory' || field === 'scriptActive') return value ?? false;
+  // Process Flow materializes empty defaults. Nonempty mappings/scripts never disappear.
+  if (value === undefined || value === null || value === '' || (object(value) && !Object.keys(value).length)) return null;
+  return value;
+}
+function variableIntent(variable) {
+  return { ...Object.fromEntries(VARIABLE_FIELDS.map(f => [f, variableField(variable, f)])),
+    attributes: Object.fromEntries(Object.entries(variable.attributes || {}).filter(([k]) => !UI_ATTRIBUTES.has(k))) };
+}
+function equalIntent(expected, actual) {
+  return JSON.stringify(semantic(expected)) === JSON.stringify(semantic(actual));
+}
+function lifecycleDefault(variable, found) {
+  const normalized = { ...variable };
+  if (!variable.scriptActive && variable.script === null && equalIntent(found.script, {})) normalized.script = {};
+  if (variable.name !== '__action_status__' || variable.type !== 'object' || variable.value !== '' || variable.complexObjectValue !== null || variable.scriptActive) return normalized;
+  // Captured fresh status becomes a serialized EMPTY code/message object on PUT.
+  try {
+    const value = JSON.parse(found.value);
+    const empty = { code: { $cv: { $c: 'java.lang.String', $v: '' } }, message: { $cv: { $c: 'java.lang.String', $v: '' } } };
+    const schema = value.complexObjectSchema?.['FlowDesigner:FDACTIONSTATUS'];
+    const facetKeys = ['uiTypeLabel', 'read_only', 'hint', 'uiType', 'default_value', 'label', 'action_error_output', 'mandatory', 'order', 'max_length', 'uiUniqueId', 'co_type_name', 'element_mapping_provider'];
+    const emptyFacet = (facet, size, type) => {
+      if (!object(facet) || !equalIntent(Object.keys(facet), ['SimpleMapFacet'])) return false;
+      const fields = JSON.parse(facet.SimpleMapFacet);
+      return Object.keys(fields).every(k => facetKeys.includes(k)) && fields.mandatory === 'false' && fields.default_value === '' && fields.max_length === String(size) && fields.uiType === type && fields.action_error_output === 'true';
+    };
+    const defaultSchema = equalIntent(Object.keys(value.complexObjectSchema || {}).sort(), ['FlowDesigner:FDACTIONSTATUS', 'FlowDesigner:FDACTIONSTATUS.$type_facets'])
+      && equalIntent(Object.keys(schema || {}).sort(), ['code', 'code.$field_facets', 'message', 'message.$field_facets'])
+      && emptyFacet(schema['code.$field_facets'], 40, 'integer') && emptyFacet(schema['message.$field_facets'], 4000, 'string')
+      && emptyFacet(value.complexObjectSchema['FlowDesigner:FDACTIONSTATUS.$type_facets'], 65000, 'object');
+    if (equalIntent(Object.keys(value).sort(), ['complexObject', 'complexObjectSchema', 'serializationFormat', 'version']) && value.version === '1.0' && value.serializationFormat === 'JSON' && defaultSchema && schema?.code === 'Integer' && schema?.message === 'String' && equalIntent(value.complexObject, empty)) normalized.value = found.value;
+  } catch { /* Non-default values remain mismatches. */ }
+  const emptyObject = { name: variable.name, value: null, scriptActive: false, script: null, scriptAsJsonString: null, parameter: null,
+    children: (variable.children || []).map(child => ({ name: child.name, value: null, scriptActive: false, script: null, scriptAsJsonString: null, children: null, parameter: child })) };
+  const statusIntent = node => {
+    if (!object(node)) return node;
+    return Object.fromEntries(Object.entries(node).filter(([key]) => !['id', 'displayValue', 'displayField'].includes(key)).map(([key, value]) => [key,
+      key === 'parameter' && value ? variableIntent(value) : key === 'children' && Array.isArray(value) ? value.map(statusIntent) : value]));
+  };
+  if (equalIntent(statusIntent(emptyObject), statusIntent(found.complexObjectValue))) normalized.complexObjectValue = found.complexObjectValue;
+  return normalized;
+}
+function variables(expected, actual, path, mismatches, inherited = new Set()) {
   if (!Array.isArray(actual) || expected.length !== actual.length) { mismatches.push(`${path}.length`); return; }
   for (const variable of expected) {
     const found = actual.find(v => v.name === variable.name);
     if (!found) { mismatches.push(`${path}.${variable.name}`); continue; }
-    for (const field of VARIABLE_FIELDS) {
-      if (Object.hasOwn(variable, field)) subset(variable[field], found[field], `${path}.${variable.name}.${field}`, mismatches);
+    const intent = variableIntent(inherited.has(variable.name) ? lifecycleDefault(variable, found) : variable);
+    const persisted = variableIntent(found);
+    for (const field of [...VARIABLE_FIELDS, 'attributes']) {
+      if (!equalIntent(intent[field], persisted[field])) mismatches.push(`${path}.${variable.name}.${field}`);
     }
-    if (variable.attributes) subset(variable.attributes, found.attributes, `${path}.${variable.name}.attributes`, mismatches);
   }
 }
-function verify(expected, actual) {
+function verify(expected, actual, inherited) {
   const mismatches = [];
-  for (const key of ['id', 'scope', 'name', 'description', 'internal_name']) {
+  for (const key of ['id', 'scope', 'name', 'description', 'internal_name', 'state']) {
     if (Object.hasOwn(expected, key)) subset(expected[key], actual[key], key, mismatches);
   }
   variables(expected.inputs, actual.inputs, 'inputs', mismatches);
-  variables(expected.outputs, actual.outputs, 'outputs', mismatches);
+  variables(expected.outputs, actual.outputs, 'outputs', mismatches, inherited);
+  if (inherited === undefined) {
+    for (const output of expected.outputs.filter(o => o.name.startsWith('__'))) {
+      if (actual.outputs.find(o => o.name === output.name)?.id !== output.id) mismatches.push(`outputs.${output.name}.id`);
+    }
+  }
   if (actual.steps.length !== expected.steps.length) mismatches.push('steps.length');
   for (const step of expected.steps) {
     const found = actual.steps.find(s => s.cid === step.cid);
     if (!found) { mismatches.push(`steps.${step.cid}`); continue; }
-    for (const key of ['cid', 'step_type', 'step_type_id', 'order', 'error_handling_type']) {
+    for (const key of ['cid', 'action', 'step_type', 'step_type_id', 'order', 'error_handling_type']) {
       if (Object.hasOwn(step, key)) subset(step[key], found[key], `steps.${step.cid}.${key}`, mismatches);
     }
     for (const key of ['inputs', 'outputs', 'extended_inputs', 'extended_outputs']) variables(step[key], found[key], `steps.${step.cid}.${key}`, mismatches);
   }
   if (mismatches.length) throw failure('action_verification_failed', `Persisted definition differs at: ${mismatches.join(', ')}`, { mismatches });
 }
-async function save(sdk, id, scope, definition) {
+async function save(sdk, id, scope, definition, inherited) {
   let writeError;
   let returned;
   try {
@@ -152,10 +212,10 @@ async function save(sdk, id, scope, definition) {
     writeError = error;
   }
   const persisted = await getAction(sdk, id, scope);
-  verify(definition, persisted);
+  verify(definition, persisted, inherited);
   if (returned?.id !== undefined && returned.id !== id) throw failure('action_identity_mismatch', 'PUT returned a different action ID');
   if (returned?.scope !== undefined && returned.scope !== scope) throw failure('action_identity_mismatch', 'PUT returned a different action scope');
-  if (Array.isArray(returned?.inputs) && Array.isArray(returned?.outputs) && Array.isArray(returned?.steps)) verify(definition, returned);
+  if (Array.isArray(returned?.inputs) && Array.isArray(returned?.outputs) && Array.isArray(returned?.steps)) verify(definition, returned, inherited);
   return { sys_id: id, scope, status: writeError ? 'persisted_after_timeout' : 'verified',
     http_write_confirmed: !writeError, definition: persisted };
 }
@@ -170,13 +230,21 @@ export async function updateAction(sdk, id, providedScope, definition) {
   const current = await getAction(sdk, id, scope);
   const omitted = Object.keys(current).filter(key => !Object.hasOwn(definition, key));
   if (omitted.length) throw errUsage(`Full update definition is missing ${omitted.join(', ')}; use actions definition first`);
-  for (const key of ['master_snapshot', 'latest_snapshot']) {
+  for (const key of ['state', 'master_snapshot', 'latest_snapshot']) {
     if (definition[key] !== current[key]) throw errUsage(`Do not replace target-owned ${key}`);
   }
   for (const key of ['sysId', 'actionTypeId']) {
     if (definition.action_status_metadata?.[key] !== current.action_status_metadata?.[key]) {
       throw errUsage(`Do not replace target-owned action_status_metadata.${key}`);
     }
+  }
+  const currentReserved = current.outputs.filter(o => o.name.startsWith('__'));
+  const suppliedReserved = definition.outputs.filter(o => o.name.startsWith('__'));
+  if (currentReserved.length !== suppliedReserved.length || currentReserved.some(o => {
+    const supplied = suppliedReserved.find(v => v.name === o.name);
+    return !supplied || supplied.id !== o.id;
+  })) {
+    throw errUsage('Do not replace or remove target-owned reserved output IDs');
   }
   try { return await save(sdk, id, scope, definition); }
   catch (error) {
@@ -187,6 +255,9 @@ export async function updateAction(sdk, id, providedScope, definition) {
 }
 export async function createAction(sdk, scope, source) {
   validateDefinition(source, undefined, scope);
+  for (const step of source.steps) {
+    if (['step_id', 'action'].some(key => step[key] !== undefined && step[key] !== null && step[key] !== '')) throw errUsage('Create requires new steps with blank step_id and action; do not reuse persisted Step IDs');
+  }
   const name = source.name || source.displayName;
   if (typeof name !== 'string' || !name.trim()) throw errUsage('Create requires a definition name');
   await validateScope(sdk, scope);
@@ -208,10 +279,11 @@ export async function createAction(sdk, scope, source) {
     // Keep this parent's lifecycle/status objects and reserved output IDs.
     const reserved = (fresh.outputs || []).filter(o => o.name?.startsWith('__'));
     const definition = { ...fresh, name, displayName: name, description: parentData.description,
-      inputs: source.inputs, outputs: [...reserved, ...source.outputs.filter(o => !o.name?.startsWith('__'))], steps: source.steps };
+      inputs: source.inputs, outputs: [...reserved, ...source.outputs.filter(o => !o.name?.startsWith('__'))],
+      steps: source.steps.map(step => ({ ...step, action: id })) };
     if (source.internal_name !== undefined) definition.internal_name = source.internal_name;
     validateDefinition(definition, id, scope);
-    return await save(sdk, id, scope, definition);
+    return await save(sdk, id, scope, definition, new Set(reserved.filter(o => ['__action_status__', '__dont_treat_as_error__'].includes(o.name)).map(o => o.name)));
   } catch (error) {
     throw failure('action_create_partial', `Action parent ${id} exists; full definition is unverified: ${error.message}. No automatic cleanup was performed.`, {
       ...error.details, sys_id: id, scope, status: 'parent_created_definition_unverified', cleanup: 'explicit',
@@ -233,7 +305,7 @@ export async function testAction(sdk, id, providedScope, suppliedDefinition, out
   const dispatched = await request(sdk, id, scope, '/test', 'POST', {
     action: definition, outputMap, runOnThread: opts.runOnThread ?? true, tracingEnabled: opts.tracingEnabled ?? false,
   });
-  if (dispatched.errorCode === undefined || Number(dispatched.errorCode) !== 0 || dispatched.errorMessage) throw failure('action_test_dispatch_failed', dispatched.errorMessage || 'Test dispatch did not return errorCode 0');
+  if (!successCode(dispatched.errorCode) || dispatched.errorMessage) throw failure('action_test_dispatch_failed', dispatched.errorMessage || 'Test dispatch did not return errorCode 0');
   const context = token(dispatched.data, 'Test context ID');
   if (!opts.wait) return { context, state: 'DISPATCHED', status: 'dispatched', outputs: null };
   const deadline = Date.now() + timeout * 1000;

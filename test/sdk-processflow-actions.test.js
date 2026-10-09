@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SDKClient } from '../src/sdk.js';
+import { readFileSync } from 'node:fs';
+
+// Captured create/normalization shapes, with a synthetic parent ID and script.
+// The failed live readback had NO steps; the responder below models attachment.
+const createFixture = JSON.parse(readFileSync(new URL('./fixtures/processflow-create.json', import.meta.url), 'utf8'));
 
 // Synthesized wire fixtures, not instance captures. IDs have no live target.
 const ID = 'a'.repeat(32);
@@ -136,15 +141,22 @@ test('PUT timeout with unpersisted steps remains an explicit failure', async () 
   assert.equal(calls.filter(c => c.method === 'PUT').length, 1);
 });
 
-function creating({ failPut = false, lostSteps = false, readFailure = false } = {}) {
+function creating({ failPut = false, lostSteps = false, readFailure = false, captured = false, mutate = () => {} } = {}) {
   let saved;
   const fresh = definition(); fresh.inputs = []; fresh.steps = [];
-  fresh.outputs = [{ name: '__action_status__', type: 'object', id: '1'.repeat(32), children: [] }];
+  fresh.outputs = captured ? structuredClone(createFixture.freshOutputs)
+    : [{ name: '__action_status__', type: 'object', id: '1'.repeat(32), children: [] }];
   return client(c => {
     if (c.method === 'POST' && c.url.pathname === '/api/now/table/sys_hub_action_type_definition') return { result: { sys_id: ID, sys_scope: SCOPE } };
     if (c.method === 'PUT') {
       if (failPut) throw new Error('permission denied');
       saved = structuredClone(c.body);
+      if (captured) {
+        // The independent bound-step probe proves action is the attachment key.
+        saved.steps = saved.steps.filter(s => s.action === ID);
+        saved.outputs = [...structuredClone(createFixture.normalizedOutputs), ...saved.outputs.filter(o => !o.name.startsWith('__'))];
+      }
+      mutate(saved);
       return { result: saved };
     }
     if (c.url.pathname === path && c.method === 'GET') {
@@ -172,7 +184,7 @@ test('create initializes own lifecycle defaults, installs full steps and verifie
   assert.equal(put.body.latest_snapshot, '');
   assert.equal(put.body.action_status_metadata.sysId, 'd'.repeat(32));
   assert.equal(put.body.outputs[0].id, '1'.repeat(32));
-  assert.deepEqual(put.body.steps, source.steps);
+  assert.deepEqual(put.body.steps, source.steps.map(step => ({ ...step, action: ID })));
   assert.deepEqual(put.body.inputs, source.inputs);
   assert.equal(calls.at(-1).url.pathname, `${path}/step_instances`);
 });
@@ -199,6 +211,112 @@ test('create validates definition and scope existence before creating parent', a
   assert.ok(calls.every(c => c.method === 'GET'));
 });
 
+test('captured create binds new steps to allocated parent and accepts only empty lifecycle normalization', async () => {
+  const source = structuredClone(createFixture.source);
+  const before = structuredClone(source);
+  const { sdk, calls } = creating({ captured: true });
+  const result = await sdk.createProcessFlowAction(SCOPE, source);
+  assert.equal(result.status, 'verified');
+  assert.equal(result.definition.steps.length, 1);
+  assert.notEqual(source.id, result.sys_id);
+  assert.equal(calls.find(c => c.method === 'PUT').body.steps[0].action, ID);
+  assert.deepEqual(source, before);
+  assert.equal(calls.filter(c => c.method === 'POST').length, 1);
+  assert.equal(calls.filter(c => c.method === 'PUT').length, 1);
+  assert.ok(!calls.some(c => c.method === 'DELETE'));
+});
+
+for (const [label, mutate] of [
+  ['persisted step ID', s => { s.step_id = 'f'.repeat(32); }],
+  ['foreign step action', s => { s.action = 'f'.repeat(32); }],
+  ['malformed step ID', s => { s.step_id = false; }],
+]) {
+  test(`create rejects ${label} before parent allocation`, async () => {
+    const source = structuredClone(createFixture.source); mutate(source.steps[0]);
+    const { sdk, calls } = creating({ captured: true });
+    await assert.rejects(sdk.createProcessFlowAction(SCOPE, source), /new step|Step/);
+    assert.equal(calls.length, 0);
+  });
+}
+
+for (const [label, mutate] of [
+  ['output mapping', d => { d.outputs.find(o => o.name === 'response').value = ''; }],
+  ['status code', d => { const o = d.outputs[0]; const v = JSON.parse(o.value); v.complexObject.code.$cv.$v = '1'; o.value = JSON.stringify(v); }],
+  ['serialized required constraint', d => {
+    const o = d.outputs[0]; const v = JSON.parse(o.value); const facet = v.complexObjectSchema['FlowDesigner:FDACTIONSTATUS']['code.$field_facets'];
+    const fields = JSON.parse(facet.SimpleMapFacet); fields.mandatory = 'true'; facet.SimpleMapFacet = JSON.stringify(fields); o.value = JSON.stringify(v);
+  }],
+  ['status object mapping', d => { d.outputs[0].complexObjectValue.children[0].value = '{{inputs.code}}'; }],
+  ['status parameter constraint', d => { d.outputs[0].complexObjectValue.children[0].parameter.mandatory = true; }],
+  ['status script', d => { d.outputs[0].script = { script: 'changed' }; }],
+  ['error behavior', d => { d.outputs[1].value = true; }],
+]) {
+  test(`captured create still rejects changed ${label}`, async () => {
+    const { sdk } = creating({ captured: true, mutate });
+    await assert.rejects(sdk.createProcessFlowAction(SCOPE, createFixture.source), e => e.code === 'action_create_partial' && e.details.mismatches?.some(p => p.startsWith('outputs.')));
+  });
+}
+
+for (const [label, change] of [
+  ['state', d => { d.state = 'published'; }],
+  ['reserved output ID', d => { d.outputs[1].id = 'f'.repeat(32); }],
+  ['removed reserved output', d => { d.outputs.pop(); }],
+]) {
+  test(`update rejects target-owned ${label} before PUT`, async () => {
+    const current = definition(); current.outputs.push({ name: '__action_status__', type: 'object', id: '1'.repeat(32) });
+    const source = structuredClone(current); change(source);
+    const { sdk, calls } = client(responder(current));
+    await assert.rejects(sdk.updateProcessFlowAction(ID, SCOPE, source));
+    assert.ok(calls.every(c => c.method === 'GET'));
+  });
+}
+
+test('update readback must retain protected reserved output IDs', async () => {
+  const current = definition(); current.outputs.push({ name: '__action_status__', type: 'object', id: '1'.repeat(32) });
+  let saved = current;
+  const { sdk } = client(c => {
+    if (c.method === 'PUT') { saved = structuredClone(c.body); saved.outputs[1].id = 'f'.repeat(32); return { result: saved }; }
+    return responder(saved)(c);
+  });
+  await assert.rejects(sdk.updateProcessFlowAction(ID, SCOPE, current), e => e.code === 'action_verification_failed' && e.details.mismatches.includes('outputs.__action_status__.id'));
+});
+
+for (const [label, changeSource, changeSaved] of [
+  ['removed script value', d => { delete d.steps[0].inputs[0].value; }, () => {}],
+  ['removed output mapping', d => { delete d.outputs[0].value; }, () => {}],
+  ['removed script object', d => { delete d.outputs[0].script; }, d => { d.outputs[0].script = { script: 'retained' }; }],
+  ['added required schema field', () => {}, d => { d.inputs[0].attributes.schema.fields.extra = { type: 'string', required: true }; }],
+  ['added child constraint', () => {}, d => { d.inputs[0].children[0].mandatory = true; }],
+  ['added data structure', () => {}, d => { d.inputs[0].data_structure = 'f'.repeat(32); }],
+]) {
+  test(`verification rejects ${label}`, async () => {
+    const source = definition(); const saved = definition(); changeSource(source); changeSaved(saved);
+    const { sdk } = client(responder(saved));
+    await assert.rejects(sdk.updateProcessFlowAction(ID, SCOPE, source), e => e.code === 'action_verification_failed');
+  });
+}
+
+for (const errorCode of [null, false, '', '00', true]) {
+  test(`test rejects non-explicit success errorCode ${JSON.stringify(errorCode)}`, async () => {
+    const base = responder();
+    const { sdk } = client(c => c.url.pathname.endsWith('/test') ? { result: { data: CONTEXT, errorCode } } : base(c));
+    await assert.rejects(sdk.testProcessFlowAction(ID, SCOPE, definition()));
+  });
+}
+
+test('explicit numeric and string zero errorCodes both dispatch successfully', async () => {
+  for (const errorCode of [0, '0']) {
+    const { sdk } = testing({ errorCode });
+    assert.equal((await sdk.testProcessFlowAction(ID, SCOPE, definition())).status, 'dispatched');
+  }
+});
+
+test('generated UI attributes do not hide or invent schema constraints', async () => {
+  const saved = definition(); saved.inputs[0].attributes.uiUniqueId = 'generated'; saved.inputs[0].children[0].id = 'f'.repeat(32);
+  const { sdk } = client(responder(saved));
+  assert.equal((await sdk.updateProcessFlowAction(ID, SCOPE, definition())).status, 'verified');
+});
+
 test('step-types uses exact scoped schema discovery endpoint', async () => {
   const { sdk, calls } = client(() => ({ result: [{ type: 'SCRIPT', id: 'e'.repeat(32) }] }));
   assert.deepEqual(await sdk.getProcessFlowStepTypes(SCOPE), [{ type: 'SCRIPT', id: 'e'.repeat(32) }]);
@@ -209,7 +327,7 @@ test('step-types uses exact scoped schema discovery endpoint', async () => {
 function testing({ state = 'COMPLETE', message = '', errorCode = 0, values, denied = false, rows, running = false } = {}) {
   const base = responder();
   return client(c => {
-    if (c.url.pathname === `${path}/test`) return { result: { data: CONTEXT, errorCode, errorMessage: errorCode ? 'dispatch rejected' : '' } };
+    if (c.url.pathname === `${path}/test`) return { result: { data: CONTEXT, errorCode, errorMessage: errorCode === 0 || errorCode === '0' ? '' : 'dispatch rejected' } };
     if (c.url.pathname === `/api/now/table/sys_flow_context/${CONTEXT}`) return { result: { sys_id: CONTEXT, state: running ? 'IN_PROGRESS' : state, error_message: message } };
     if (c.url.pathname === '/api/now/table/sys_flow_runtime_value') {
       if (denied) throw new Error('API error (status 403): denied');

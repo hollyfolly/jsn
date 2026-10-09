@@ -28,6 +28,8 @@ function app() {
     config: { activeProfile: 'test', profiles: { test: { skip_confirmations: false } } },
     getEffectiveInstance: () => 'https://example.invalid',
     sdk: {
+      baseURL: 'https://example.invalid',
+      request: async (url, opts) => { calls.push(['request', url, opts]); return { result: [] }; },
       list: async (_table, params) => { calls.push(['list', params]); return [{ sys_id: ID, sys_scope: { value: SCOPE }, name: 'Echo' }]; },
       get: async (table, id) => { calls.push(['get', table, id]); return table === 'sys_scope' ? { sys_id: SCOPE } : { sys_id: ID, sys_scope: SCOPE }; },
       getProcessFlowAction: async (...args) => { calls.push(['definition', ...args]); return fixture; },
@@ -71,14 +73,14 @@ test('create and update forward full data-file documents without generic table m
 
 test('test command loads saved definition by default and --get returns actual output', async () => {
   const a = app(); a.output.setJqFilter('data.outputs.response.value');
-  await commands().get('test').handler({ identifier: ID, 'output-map': '{"response":"hello"}', wait: true, timeout: 7, 'run-on-thread': true, 'tracing-enabled': false }, a);
+  await commands().get('test').handler({ identifier: ID, force: true, 'output-map': '{"response":"hello"}', wait: true, timeout: 7, 'run-on-thread': true, 'tracing-enabled': false }, a);
   assert.deepEqual(a.calls.at(-1), ['test', ID, undefined, undefined, { response: 'hello' }, { wait: true, timeout: 7, runOnThread: true, tracingEnabled: false }]);
   assert.equal(JSON.parse(a.writes.join('')), 'echo');
 });
 
 test('test supplied full JSON and input outputMap are separate documents', async () => {
   const a = app();
-  await commands().get('test').handler({ identifier: ID, scope: SCOPE, data: JSON.stringify(fixture), 'output-map': '{"response":"value"}' }, a);
+  await commands().get('test').handler({ identifier: ID, force: true, scope: SCOPE, data: JSON.stringify(fixture), 'output-map': '{"response":"value"}' }, a);
   assert.deepEqual(a.calls.at(-1).slice(1, 5), [ID, SCOPE, fixture, { response: 'value' }]);
 });
 
@@ -90,7 +92,7 @@ test('partial creation/test failures use error envelopes and nonzero exit status
       a.sdk[verb === 'create' ? 'createProcessFlowAction' : 'testProcessFlowAction'] = async () => {
         const e = new Error(`unverified action ${ID}`); e.code = code; e.details = { sys_id: ID, status: 'unverified' }; throw e;
       };
-      await commands().get(verb).handler({ identifier: ID, scope: SCOPE, data: JSON.stringify(fixture) }, a);
+      await commands().get(verb).handler({ identifier: ID, force: true, scope: SCOPE, data: JSON.stringify(fixture) }, a);
       const result = JSON.parse(a.writes.join(''));
       assert.equal(result.ok, false); assert.equal(result.code, code);
       assert.equal(JSON.parse(result.hint).sys_id, ID);
@@ -106,12 +108,44 @@ test('delete retains confirmation and scope mismatch fails before deletion', asy
   assert.ok(!a.calls.some(c => c[0] === 'delete'));
 });
 
+test('test script dispatch requires confirmation before any execution', async () => {
+  const previous = process.env.JSN_NO_PROMPTS; process.env.JSN_NO_PROMPTS = '1';
+  try {
+    const a = app();
+    await assert.rejects(commands().get('test').handler({ identifier: ID }, a), e => e.code === 'confirmation_required');
+    assert.ok(!a.calls.some(c => c[0] === 'test'));
+    await commands().get('test').handler({ identifier: ID, force: true }, a);
+    assert.equal(a.calls.filter(c => c[0] === 'test').length, 1);
+  } finally {
+    if (previous === undefined) delete process.env.JSN_NO_PROMPTS; else process.env.JSN_NO_PROMPTS = previous;
+  }
+});
+
+for (const response of [{}, { result: null }, { result: {} }, { error: { message: 'denied' }, result: [] }, { result: [{ sys_id: ID }] }]) {
+  test(`delete cannot infer absence from ${JSON.stringify(response)}`, async () => {
+    const a = app(); a.sdk.request = async () => response;
+    await assert.rejects(commands().get('delete').handler({ identifier: ID, force: true }, a), /unverified/);
+    assert.equal(a.writes.length, 0);
+  });
+}
+
+test('delete confirms exact target absence through an explicit error-free array', async () => {
+  const a = app();
+  await commands().get('delete').handler({ identifier: ID, force: true }, a);
+  const readback = a.calls.at(-1); const url = new URL(readback[1]);
+  assert.equal(readback[0], 'request'); assert.equal(readback[2].method, 'GET');
+  assert.equal(url.pathname, '/api/now/table/sys_hub_action_type_definition');
+  assert.equal(url.searchParams.get('sysparm_query'), `sys_id=${ID}`);
+  assert.equal(url.searchParams.get('sysparm_limit'), '1');
+  assert.equal(JSON.parse(a.writes.join('')).data.deleted, true);
+});
+
 test('actual CLI adapter accepts action edit alias and wait options', async () => {
   const a = app();
   const parse = args => cliAdapter(args).command(actionsCmd(fn => argv => fn(argv, a))).parse();
   await parse(['action', 'edit', ID, '--scope', SCOPE, '--data', JSON.stringify(fixture)]);
   assert.equal(a.calls.at(-1)[0], 'update');
-  await parse(['actions', 'test', ID, '--wait', '--timeout', '12', '--output-map', '{"response":"hello"}']);
+  await parse(['actions', 'test', ID, '--force', '--wait', '--timeout', '12', '--output-map', '{"response":"hello"}']);
   assert.equal(a.calls.at(-1)[5].wait, true);
   assert.equal(a.calls.at(-1)[5].timeout, 12);
 });

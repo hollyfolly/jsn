@@ -106,8 +106,8 @@ jsn actions definition <action_sys_id> --get data > action.json
 # Edit action.json, retaining its ID, scope, lifecycle fields and all arrays.
 jsn actions update <action_sys_id> --data-file action.json --json
 jsn action edit <action_sys_id> --data-file action.json --json  # same operation
-jsn actions test <action_sys_id> --output-map '{"response":"hello"}' --wait --timeout 60 --json
-jsn actions test <action_sys_id> --data-file action.json --output-map '{"response":"hello"}' --wait --get data.outputs.response.value
+jsn actions test <action_sys_id> --force --output-map '{"response":"hello"}' --wait --timeout 60 --json
+jsn actions test <action_sys_id> --force --data-file action.json --output-map '{"response":"hello"}' --wait --get data.outputs.response.value
 jsn actions delete <action_sys_id> --force  # explicit cleanup, never automatic
 ```
 
@@ -120,7 +120,9 @@ Replace `<SCRIPT_STEP_TYPE_SYS_ID>` with the target's `step-types` result.
 Start from that step type's full input/output schemas, preserving runtime
 settings, status outputs and any other required fields. The shortened example
 is not a captured or instance-verified template. New steps/variables need their
-own identifiers; do not clone another action's record IDs.
+own identifiers; do not clone another action's record IDs. Leave new steps'
+`step_id` and `action` blank or omitted. Create binds their `action` to the newly
+allocated parent; persisted step IDs or parent bindings are rejected before creation.
 
 ```json
 {
@@ -166,8 +168,10 @@ have `value`, `displayValue` and `hasValue`; false, zero and empty strings count
 Failures, denied/missing outputs and timeouts exit nonzero. The wait budget
 starts after dispatch, defaults to 60 seconds, and is capped at 3600 seconds.
 Timeout does not cancel the server execution. Draft actions can be tested without
-publication. Testing runs their scripts and can have side effects; read-only
-profiles block create/update/delete/test. No publish or snapshot command is added.
+publication. Testing runs their scripts and can have side effects. It requires
+interactive confirmation or `--force`, unless the profile explicitly skips
+confirmations. Read-only profiles block create/update/delete/test. No publish
+or snapshot command is added.
 These internal endpoints and runtime-table permissions can vary by instance.
 
 ### Flow execution fields

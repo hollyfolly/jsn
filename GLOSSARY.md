@@ -116,8 +116,11 @@ A complete **action definition** is Process Flow metadata plus executable
 `steps` from `/step_instances`, including inputs, outputs, scripts and mappings.
 The `sys_hub_action_type_definition` row alone is only the **parent**, not proof
 of an executable action. Create combines a source document's executable fields
-with the new parent's own defaults; update requires a full target document.
-A **verified save** compares persisted executable fields after the PUT. A
+with the new parent's own defaults and binds new steps to that parent. Create
+rejects persisted step IDs and parent bindings before allocating a parent.
+Update requires a full target document, preserving state and reserved output IDs.
+A **verified save** compares persisted executable fields after the PUT in both
+directions. Only known empty defaults and server UI metadata are normalized. A
 **test dispatch** only returns a context ID; a **completed action test** also
 requires `COMPLETE`, blank error fields and actual declared runtime outputs.
 Neither operation implies publication.
