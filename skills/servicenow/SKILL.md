@@ -73,16 +73,16 @@ Pick the most specific tool for the job. **Never default to eval** — it's the 
 | **Docs** | `docs sync`, `docs status`, `docs search`, `docs serve` |
 | **Developer** | `eval`, `rest`, `skill`, `version` |
 
-### `jsn rest` examples
+### Table and raw REST examples
 
 ```bash
-# Query any table by name
-jsn rest --table incident --query "active=true" --json
+# Query a table with the normal records command
+jsn records list --table incident --query "active=true" --limit 5 --json
 
-# GET a single record
-jsn rest "/api/now/table/incident/abc123..." --json
+# Get a single record
+jsn records get --table incident --sys-id abc123... --json
 
-# Raw endpoint access
+# Raw endpoint access when no specific command fits
 jsn rest "/api/now/table/incident?sysparm_limit=3" --json
 ```
 
