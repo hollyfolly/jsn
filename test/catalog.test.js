@@ -167,7 +167,7 @@ describe('enrichCatalogItem', () => {
     assert.strictEqual(data.flow_cmd, undefined);
   });
 
-  it('resolves workflow + workflow_cmd from display value and sys_id', async () => {
+  it('resolves workflow from display value', async () => {
     const sdk = buildEnrichSdk({
       item: {
         flow_designer_flow: '',
@@ -176,7 +176,7 @@ describe('enrichCatalogItem', () => {
     });
     const { data } = await enrichCatalogItem({ sdk, instanceUrl: 'https://x.service-now.com', sysID: 'abc123' });
     assert.strictEqual(data.workflow, 'Fulfillment WF');
-    assert.strictEqual(data.workflow_cmd, 'jsn workflows show wf9');
+    assert.strictEqual(data.workflow_cmd, undefined);
   });
 
   it('resolves delivery_plan, falling back to execution_plan', async () => {
@@ -244,7 +244,6 @@ describe('buildCatalogFormatted', () => {
       flow: 'Provision Server',
       flow_cmd: 'jsn flows show abc123',
       workflow: 'Fulfillment WF',
-      workflow_cmd: 'jsn workflows show wf9',
       execution_plan: 'Standard Plan',
     };
     const standalone = [{ name: 'cpu', question_text: 'CPU', type: '6', mandatory: 'true' }];
@@ -254,7 +253,7 @@ describe('buildCatalogFormatted', () => {
     assert.match(out, /─ Details ─/);
     assert.match(out, /short_description: {2}A test item/);
     assert.match(out, /─ Flow ─\n {2}Provision Server\n {2}→ jsn flows show abc123/);
-    assert.match(out, /─ Workflow ─\n {2}Fulfillment WF\n {2}→ jsn workflows show wf9/);
+    assert.match(out, /─ Workflow ─\n {2}Fulfillment WF/);
     assert.match(out, /─ Catalog Variables ─/);
     assert.match(out, / {2}CPU: {2}6 \(mandatory\)/);
     assert.match(out, / {2}\[Standard Set\]\n {4}RAM: {2}5/);

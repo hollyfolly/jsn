@@ -14,7 +14,7 @@ compatibility: |
   Works with Claude Code, OpenCode, Cursor, and agentskills-compatible tools.
 metadata:
   author: jacebenson
-  version: "4.0.0"
+  version: "4.3.6"
   repository: https://github.com/jacebenson/jsn
 ---
 
@@ -65,7 +65,7 @@ Pick the most specific tool for the job. **Never default to eval** — it's the 
 |--------|---------|
 | **Core** | `incidents`, `changes`, `requests`, `tasks` |
 | **Catalog** | `catalogitems list/show/create` — items with variables and flow info |
-| **Automation** | `flows`, `actions`, `rules`, `workflows`, `triggers`, `scheduledjobs` |
+| **Automation** | `flows`, `actions`, `rules`, `triggers`, `scheduledjobs` |
 | **Access** | `acls`, `b4rules`, `roles`, `groups`, `users` |
 | **UX** | `forms` (section/element layout), `lists`, `clientscripts`, `uipolicies` |
 | **Data** | `tables`, `columns`, `includes`, `logs`, `properties`, `records` |
@@ -73,16 +73,16 @@ Pick the most specific tool for the job. **Never default to eval** — it's the 
 | **Docs** | `docs sync`, `docs status`, `docs search`, `docs serve` |
 | **Developer** | `eval`, `rest`, `skill`, `version` |
 
-### `jsn rest` examples
+### Table and raw REST examples
 
 ```bash
-# Query any table by name
-jsn rest --table incident --query "active=true" --limit 5 --json
+# Query a table with the normal records command
+jsn records list --table incident --query "active=true" --limit 5 --json
 
-# GET a single record
-jsn rest --table incident --sys-id abc123... --json
+# Get a single record
+jsn records get --table incident --sys-id abc123... --json
 
-# Raw endpoint access
+# Raw endpoint access when no specific command fits
 jsn rest "/api/now/table/incident?sysparm_limit=3" --json
 ```
 
@@ -106,8 +106,6 @@ jsn docs search "REST API" --bundle it-service-management --json
 # Start the web UI
 jsn docs serve
 
-# Share on your network
-jsn docs serve --expose
 ```
 
 **Re-running `jsn docs sync`** does a smart incremental refresh — pulls latest docs and only rebuilds changed files (seconds, not minutes).
@@ -129,5 +127,5 @@ Check order (priority):
 ```
 ~/.config/servicenow/
 ├── config.json               # Profiles and settings
-└── credentials.json          # Auth tokens (fallback)
+└── credentials/              # Auth tokens (fallback, one file per key)
 ```

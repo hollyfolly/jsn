@@ -193,7 +193,7 @@ npm install
 npm test
 ```
 
-Releases are manual. After changes land on `main`, run `npm run release -- patch` (or `minor`, `major`) to test, bump the version, and push the commit and tag. When ready, publish to npm with `npm publish --access public`. Git tags mark releases; GitHub Release entries are not required.
+Releases run from the GitHub Actions workflow. Dispatch `Release production` with `patch`, `minor`, or `major`. The workflow tests and lints the repo, bumps the version, pushes the commit and tag, dispatches the npm publish workflow, and creates the GitHub release.
 
 ## License
 

@@ -42,9 +42,7 @@ Tests: `node:test` runner + eslint.
 - `GLOSSARY.md` — the domain model (command, capability registry, record
   resolver, session, output envelope, …) and the invariants that must stay
   true. Update it in the same commit that changes a concept.
-- `docs/adr/` — architecture decision records (ADR-0001 covers the
-  capability-registry / record-resolver / output-shapes deepening). Don't
-  re-litigate a rejected alternative without new friction.
+- `docs/DECISIONS.md` — short records of durable architectural choices.
 
 ## Adding a command
 
@@ -95,4 +93,5 @@ CLI-level tests spawn `bin/jsn.js` via `spawnSync` — see
 ## Git flow
 
 PRs against `main` on github.com/jacebenson/jsn, squash-merged
-(`gh pr merge --squash`). Jace tests merged main; don't push release tags.
+(`gh pr merge --squash`). Production releases run through the GitHub Actions
+release workflow; don't push release tags manually.
